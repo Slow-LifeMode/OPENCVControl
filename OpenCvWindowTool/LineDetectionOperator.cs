@@ -411,8 +411,28 @@ namespace OpenCvWindowTool
         /// <returns>符合当前首尾选择模式且几何一致的边缘点集合。</returns>
         private static List<LineEdgePoint> SelectOrderedConsistentPointsOptimized(List<List<CaliperCandidate>> candidateGroups, LineDetectionFrame frame, LineDetectionParams parameters)
         {
-            List<CaliperCandidate> orderedCandidates = candidateGroups
+            List<List<CaliperCandidate>> validGroups = candidateGroups
                 .Where(g => g.Count > 0)
+                .ToList();
+
+            if (validGroups.Count < 2)
+            {
+                return ToLineEdgePoints(validGroups.Select(g => SelectCandidateByMode(g, parameters.SelectionMode)).ToList());
+            }
+
+            PointF arrangeDir = frame.GetLineArrangeDirection(parameters.ScanDirection);
+            float tolerance = Math.Max(2.0f, Math.Min(8.0f, frame.GetScanLength(parameters.ScanDirection) * 0.04f));
+            LineHypothesis orderedBest = FindBestOrderedLineHypothesis(validGroups, arrangeDir, tolerance, parameters);
+            if (orderedBest.IsValid)
+            {
+                List<LineEdgePoint> orderedSelected = SelectInliersOptimized(validGroups, orderedBest, tolerance * 1.75f, parameters);
+                if (orderedSelected.Count >= 2)
+                {
+                    return orderedSelected;
+                }
+            }
+
+            List<CaliperCandidate> orderedCandidates = validGroups
                 .Select(g => SelectCandidateByMode(g, parameters.SelectionMode))
                 .ToList();
 
@@ -424,8 +444,6 @@ namespace OpenCvWindowTool
             List<List<CaliperCandidate>> orderedGroups = orderedCandidates
                 .Select(c => new List<CaliperCandidate> { c })
                 .ToList();
-            PointF arrangeDir = frame.GetLineArrangeDirection(parameters.ScanDirection);
-            float tolerance = Math.Max(2.0f, Math.Min(8.0f, frame.GetScanLength(parameters.ScanDirection) * 0.04f));
             LineHypothesis best = FindBestLineHypothesisByAllPairs(orderedCandidates, orderedGroups, arrangeDir, tolerance, parameters);
             if (!best.IsValid)
             {
@@ -434,6 +452,126 @@ namespace OpenCvWindowTool
 
             List<LineEdgePoint> selected = SelectInliersOptimized(orderedGroups, best, tolerance * 1.75f, parameters);
             return selected.Count >= 2 ? selected : ToLineEdgePoints(orderedCandidates);
+        }
+
+        /// <summary>
+        /// 在所有候选点中查找首条或末条几何连续的边缘线。
+        /// </summary>
+        /// <param name="groups">每条卡尺上的候选边缘点集合。</param>
+        /// <param name="arrangeDir">卡尺排列方向。</param>
+        /// <param name="tolerance">点到直线的允许距离。</param>
+        /// <param name="parameters">直线检测参数。</param>
+        /// <returns>符合首尾语义的最佳直线假设。</returns>
+        private static LineHypothesis FindBestOrderedLineHypothesis(List<List<CaliperCandidate>> groups, PointF arrangeDir, float tolerance, LineDetectionParams parameters)
+        {
+            List<CaliperCandidate> candidates = groups.SelectMany(g => g).ToList();
+            if (candidates.Count < 2)
+            {
+                return LineHypothesis.Invalid;
+            }
+
+            int minSupport = Math.Max(4, (int)Math.Ceiling(groups.Count * 0.50d));
+            int minContinuous = Math.Max(3, (int)Math.Ceiling(groups.Count * 0.20d));
+            LineHypothesis best = LineHypothesis.Invalid;
+            float bestOffset = 0f;
+            float bestScore = float.NegativeInfinity;
+
+            for (int i = 0; i < candidates.Count - 1; i++)
+            {
+                for (int j = i + 1; j < candidates.Count; j++)
+                {
+                    if (candidates[i].CaliperIndex == candidates[j].CaliperIndex) continue;
+
+                    LineHypothesis hypothesis = LineHypothesis.FromPoints(candidates[i].Point, candidates[j].Point);
+                    if (!hypothesis.IsValid) continue;
+
+                    float orientation = Math.Abs(Dot(hypothesis.Direction, arrangeDir));
+                    if (orientation < 0.9f) continue;
+
+                    float averageOffset;
+                    float score;
+                    if (!TryScoreOrderedHypothesis(hypothesis, groups, tolerance, minSupport, minContinuous, orientation, out averageOffset, out score))
+                    {
+                        continue;
+                    }
+
+                    if (!best.IsValid || IsBetterOrderedHypothesis(averageOffset, score, bestOffset, bestScore, parameters.SelectionMode))
+                    {
+                        best = hypothesis.WithScore(score);
+                        bestOffset = averageOffset;
+                        bestScore = score;
+                    }
+                }
+            }
+
+            return best;
+        }
+
+        /// <summary>
+        /// 计算候选直线的连续支持度和扫描方向位置。
+        /// </summary>
+        private static bool TryScoreOrderedHypothesis(LineHypothesis hypothesis, List<List<CaliperCandidate>> groups, float tolerance, int minSupport, int minContinuous, float orientation, out float averageOffset, out float score)
+        {
+            int support = 0;
+            int continuous = 0;
+            int bestContinuous = 0;
+            float offsetSum = 0f;
+            score = orientation;
+
+            foreach (List<CaliperCandidate> group in groups)
+            {
+                CaliperCandidate bestCandidate = CaliperCandidate.Invalid;
+                float bestDistance = float.MaxValue;
+
+                foreach (CaliperCandidate candidate in group)
+                {
+                    float dx = candidate.Point.X - hypothesis.Point.X;
+                    float dy = candidate.Point.Y - hypothesis.Point.Y;
+                    float distance = Math.Abs(dx * hypothesis.Normal.X + dy * hypothesis.Normal.Y);
+                    if (distance <= tolerance && (distance < bestDistance || !bestCandidate.IsValid || candidate.Strength > bestCandidate.Strength))
+                    {
+                        bestDistance = distance;
+                        bestCandidate = candidate;
+                    }
+                }
+
+                if (bestCandidate.IsValid)
+                {
+                    support++;
+                    continuous++;
+                    if (continuous > bestContinuous) bestContinuous = continuous;
+                    offsetSum += bestCandidate.Offset;
+                    score += 1.0f + (1.0f - bestDistance / tolerance) * 0.5f;
+                }
+                else
+                {
+                    continuous = 0;
+                }
+            }
+
+            averageOffset = support == 0 ? 0f : offsetSum / support;
+            score += bestContinuous * 0.2f;
+            return support >= minSupport && bestContinuous >= minContinuous;
+        }
+
+        /// <summary>
+        /// 按扫描顺序比较首条或末条候选直线。
+        /// </summary>
+        private static bool IsBetterOrderedHypothesis(float offset, float score, float bestOffset, float bestScore, LineSelectionMode selectionMode)
+        {
+            const float offsetTolerance = 0.5f;
+            if (selectionMode == LineSelectionMode.First)
+            {
+                if (offset < bestOffset - offsetTolerance) return true;
+                if (offset > bestOffset + offsetTolerance) return false;
+            }
+            else
+            {
+                if (offset > bestOffset + offsetTolerance) return true;
+                if (offset < bestOffset - offsetTolerance) return false;
+            }
+
+            return score > bestScore;
         }
 
         /// <summary>
