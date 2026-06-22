@@ -1,0 +1,13 @@
+.vs/
+bin/
+obj/
+_verify_debug/
+
+*.user
+*.suo
+*.cache
+*.log
+
+*.zip
+*.rar
+*.7z

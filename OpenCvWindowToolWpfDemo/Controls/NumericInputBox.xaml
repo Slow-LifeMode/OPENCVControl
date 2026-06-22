@@ -1,0 +1,42 @@
+<UserControl x:Class="OpenCvWindowToolWpfDemo.Controls.NumericInputBox"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             MinHeight="28"
+             Focusable="False"
+             Loaded="NumericInputBox_Loaded"
+             PreviewMouseWheel="NumericInputBox_PreviewMouseWheel">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="22" />
+        </Grid.ColumnDefinitions>
+
+        <Border BorderBrush="#AAB2BD" BorderThickness="1,1,0,1" Background="White">
+            <TextBox x:Name="ValueTextBox"
+                     BorderThickness="0"
+                     Padding="7,3"
+                     VerticalContentAlignment="Center"
+                     PreviewTextInput="ValueTextBox_PreviewTextInput"
+                     TextChanged="ValueTextBox_TextChanged"
+                     LostFocus="ValueTextBox_LostFocus"
+                     KeyDown="ValueTextBox_KeyDown" />
+        </Border>
+
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Button Grid.Row="0"
+                    Content="▲"
+                    Padding="0"
+                    FontSize="8"
+                    Click="IncreaseButton_Click" />
+            <Button Grid.Row="1"
+                    Content="▼"
+                    Padding="0"
+                    FontSize="8"
+                    Click="DecreaseButton_Click" />
+        </Grid>
+    </Grid>
+</UserControl>
