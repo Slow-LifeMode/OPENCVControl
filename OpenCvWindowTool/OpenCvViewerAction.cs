@@ -43,6 +43,16 @@ namespace OpenCvWindowTool
         private bool enableRoiInteraction = true;
 
         /// <summary>
+        /// 缩放上限。
+        /// </summary>
+        private const float MaximumZoom = 1000f;
+
+        /// <summary>
+        /// 像素网格显示阈值，缩放超过该值后开始显示黑色分割线。
+        /// </summary>
+        private const float PixelGridZoomThreshold = 25f;
+
+        /// <summary>
         /// 初始化行为层并绑定画布事件。
         /// </summary>
         public OpenCvViewerAction(Control owner, BufferedImagePanel canvas, Label statusLabel)
@@ -469,9 +479,16 @@ namespace OpenCvWindowTool
             e.Graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
             if (bitmap == null || !showImage) return;
 
+            PixelOffsetMode oldPixelOffsetMode = e.Graphics.PixelOffsetMode;
+            e.Graphics.PixelOffsetMode = PixelOffsetMode.Half;
             bool isRoiEditing = IsRoiEditing;
             RectangleF imageRect = GetImageRect();
             e.Graphics.DrawImage(bitmap, imageRect);
+            e.Graphics.PixelOffsetMode = oldPixelOffsetMode;
+            if (zoom >= PixelGridZoomThreshold)
+            {
+                DrawPixelGrid(e.Graphics, imageRect);
+            }
             if (showCrosshair)
             {
                 DrawCrosshair(e.Graphics, imageRect);
@@ -680,6 +697,51 @@ namespace OpenCvWindowTool
         }
 
         /// <summary>
+        /// 绘制像素网格线。
+        /// </summary>
+        /// <param name="graphics">绘图对象。</param>
+        /// <param name="imageRect">图像显示区域。</param>
+        private void DrawPixelGrid(Graphics graphics, RectangleF imageRect)
+        {
+            if (bitmap == null || zoom < PixelGridZoomThreshold) return;
+
+            int firstColumn = Math.Max(0, (int)Math.Floor((-pan.X) / zoom));
+            int lastColumn = Math.Min(bitmap.Width, (int)Math.Ceiling((canvas.ClientSize.Width - pan.X) / zoom));
+            int firstRow = Math.Max(0, (int)Math.Floor((-pan.Y) / zoom));
+            int lastRow = Math.Min(bitmap.Height, (int)Math.Ceiling((canvas.ClientSize.Height - pan.Y) / zoom));
+
+            if (lastColumn < firstColumn || lastRow < firstRow) return;
+
+            SmoothingMode oldSmoothingMode = graphics.SmoothingMode;
+            PixelOffsetMode oldPixelOffsetMode = graphics.PixelOffsetMode;
+            graphics.SmoothingMode = SmoothingMode.None;
+            graphics.PixelOffsetMode = PixelOffsetMode.None;
+
+            float left = imageRect.Left;
+            float top = imageRect.Top;
+            float right = imageRect.Right;
+            float bottom = imageRect.Bottom;
+
+            using (Pen pen = new Pen(Color.Black, 1f))
+            {
+                for (int x = firstColumn; x <= lastColumn; x++)
+                {
+                    float screenX = left + x * zoom;
+                    graphics.DrawLine(pen, screenX, top, screenX, bottom);
+                }
+
+                for (int y = firstRow; y <= lastRow; y++)
+                {
+                    float screenY = top + y * zoom;
+                    graphics.DrawLine(pen, left, screenY, right, screenY);
+                }
+            }
+
+            graphics.SmoothingMode = oldSmoothingMode;
+            graphics.PixelOffsetMode = oldPixelOffsetMode;
+        }
+
+        /// <summary>
         /// 绘制十字线。
         /// </summary>
         /// <param name="graphics">绘图对象。</param>
@@ -728,7 +790,7 @@ namespace OpenCvWindowTool
                 imagePoint = ToImage(screenLocation);
             }
 
-            zoom = Math.Max(0.01f, Math.Min(100f, zoom * factor));
+            zoom = Math.Max(0.01f, Math.Min(MaximumZoom, zoom * factor));
             pan = new PointF(screenLocation.X - imagePoint.X * zoom, screenLocation.Y - imagePoint.Y * zoom);
             canvas.Invalidate();
         }
