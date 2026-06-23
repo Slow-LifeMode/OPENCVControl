@@ -28,7 +28,7 @@ namespace OpenCvWindowToolWpfDemo
             DataContext = viewModel;
             SubscribeViewModelEvents();
 
-            viewer = new OpenCvImageViewer { DisplayToolBar = false };
+            viewer = new OpenCvImageViewer { DisplayToolBar = true };
             viewer.RoiChanged += Viewer_RoiChanged;
             viewer.RoiEditCompleted += Viewer_RoiEditCompleted;
             viewer.SelectedRoiChanged += Viewer_SelectedRoiChanged;

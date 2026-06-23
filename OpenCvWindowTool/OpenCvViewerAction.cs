@@ -39,6 +39,7 @@ namespace OpenCvWindowTool
         private bool roiGeometryChanged;
         private bool showImage = true;
         private bool showRois = true;
+        private bool showCrosshair;
         private bool enableRoiInteraction = true;
 
         /// <summary>
@@ -115,6 +116,20 @@ namespace OpenCvWindowTool
         }
 
         /// <summary>
+        /// 获取或设置是否显示红色十字线。
+        /// </summary>
+        public bool ShowCrosshair
+        {
+            get { return showCrosshair; }
+            set
+            {
+                if (showCrosshair == value) return;
+                showCrosshair = value;
+                canvas.Invalidate();
+            }
+        }
+
+        /// <summary>
         /// ROI选中对象变化事件。
         /// </summary>
         public event EventHandler SelectedRoiChanged;
@@ -173,6 +188,7 @@ namespace OpenCvWindowTool
             bitmap = OpenCvImageConverter.ToBitmap(image);
             ClearLineDetectionResult();
             FitImage();
+            UpdateStatus(new System.Drawing.Point(-1, -1));
         }
 
         /// <summary>
@@ -192,7 +208,7 @@ namespace OpenCvWindowTool
             UnsubscribeRoiRefreshDisplayEvent(rois);
             rois.Clear();
             SetSelectedRoi(null);
-            statusLabel.Text = string.Empty;
+            statusLabel.Text = "图像: -";
             canvas.Invalidate();
         }
 
@@ -212,6 +228,23 @@ namespace OpenCvWindowTool
             zoom = Math.Max(0.01f, Math.Min(scaleX, scaleY));
             pan = new PointF((canvas.Width - bitmap.Width * zoom) / 2f, (canvas.Height - bitmap.Height * zoom) / 2f);
             canvas.Invalidate();
+            UpdateStatus(new System.Drawing.Point(-1, -1));
+        }
+
+        /// <summary>
+        /// 放大图像。
+        /// </summary>
+        public void ZoomIn()
+        {
+            ZoomAt(new System.Drawing.Point(canvas.Width / 2, canvas.Height / 2), 1.2f);
+        }
+
+        /// <summary>
+        /// 缩小图像。
+        /// </summary>
+        public void ZoomOut()
+        {
+            ZoomAt(new System.Drawing.Point(canvas.Width / 2, canvas.Height / 2), 1f / 1.2f);
         }
 
         /// <summary>
@@ -431,13 +464,18 @@ namespace OpenCvWindowTool
 
         private void Canvas_Paint(object sender, PaintEventArgs e)
         {
-            e.Graphics.Clear(Color.Black);
+            e.Graphics.Clear(canvas.BackColor);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             e.Graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
             if (bitmap == null || !showImage) return;
 
             bool isRoiEditing = IsRoiEditing;
-            e.Graphics.DrawImage(bitmap, GetImageRect());
+            RectangleF imageRect = GetImageRect();
+            e.Graphics.DrawImage(bitmap, imageRect);
+            if (showCrosshair)
+            {
+                DrawCrosshair(e.Graphics, imageRect);
+            }
             if (!isRoiEditing)
             {
                 DrawOverlays(e.Graphics, overlays);
@@ -459,9 +497,7 @@ namespace OpenCvWindowTool
 
             PointF imagePoint = ToImage(e.Location);
             float factor = e.Delta > 0 ? 1.2f : 1f / 1.2f;
-            zoom = Math.Max(0.01f, Math.Min(100f, zoom * factor));
-            pan = new PointF(e.X - imagePoint.X * zoom, e.Y - imagePoint.Y * zoom);
-            canvas.Invalidate();
+            ZoomAt(e.Location, factor, imagePoint);
         }
 
         private void Canvas_MouseDown(object sender, MouseEventArgs e)
@@ -643,6 +679,25 @@ namespace OpenCvWindowTool
             }
         }
 
+        /// <summary>
+        /// 绘制十字线。
+        /// </summary>
+        /// <param name="graphics">绘图对象。</param>
+        /// <param name="imageRect">图像显示区域。</param>
+        private static void DrawCrosshair(Graphics graphics, RectangleF imageRect)
+        {
+            if (imageRect.Width <= 0f || imageRect.Height <= 0f) return;
+
+            using (Pen pen = new Pen(Color.Red, 1f))
+            {
+                pen.DashStyle = DashStyle.Dash;
+                float centerX = imageRect.Left + imageRect.Width / 2f;
+                float centerY = imageRect.Top + imageRect.Height / 2f;
+                graphics.DrawLine(pen, imageRect.Left, centerY, imageRect.Right, centerY);
+                graphics.DrawLine(pen, centerX, imageRect.Top, centerX, imageRect.Bottom);
+            }
+        }
+
         private void DrawCross(Graphics graphics, Pen pen, PointF center, float size)
         {
             PointF left = ToScreen(new PointF(center.X - size, center.Y));
@@ -656,6 +711,26 @@ namespace OpenCvWindowTool
         private RectangleF GetImageRect()
         {
             return new RectangleF(pan.X, pan.Y, bitmap.Width * zoom, bitmap.Height * zoom);
+        }
+
+        /// <summary>
+        /// 按指定中心点执行缩放。
+        /// </summary>
+        /// <param name="screenLocation">屏幕坐标。</param>
+        /// <param name="factor">缩放倍率。</param>
+        /// <param name="imagePoint">可选的图像坐标缓存。</param>
+        private void ZoomAt(System.Drawing.Point screenLocation, float factor, PointF imagePoint = default(PointF))
+        {
+            if (bitmap == null) return;
+
+            if (imagePoint == default(PointF))
+            {
+                imagePoint = ToImage(screenLocation);
+            }
+
+            zoom = Math.Max(0.01f, Math.Min(100f, zoom * factor));
+            pan = new PointF(screenLocation.X - imagePoint.X * zoom, screenLocation.Y - imagePoint.Y * zoom);
+            canvas.Invalidate();
         }
 
         private Rectangle ToScreen(RectangleF rect)
