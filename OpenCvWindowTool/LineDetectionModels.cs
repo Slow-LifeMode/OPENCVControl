@@ -50,8 +50,11 @@ namespace OpenCvWindowTool
     /// </summary>
     public enum LineFitMode
     {
-        Robust,
-        LeastSquares
+        Local,
+        LeastSquares,
+        Huber,
+        Ransac,
+        Robust = Huber
     }
 
     /// <summary>
@@ -61,15 +64,21 @@ namespace OpenCvWindowTool
     {
         public LineDetectionParams()
         {
-            EdgeThreshold = 20f;
-            SampleCount = 40;
+            EdgeThreshold = 30f;
+            SampleCount = 30;
             SampleStep = 1f;
-            SmoothSize = 3;
-            EdgePolarity = LineEdgePolarity.Any;
+            SmoothSize = 1;
+            EdgeWidth = 1;
+            ProjectionWidth = 1;
+            RejectRatio = 20;
+            RejectDistance = 5;
+            ProfileLineIndex = 1;
+            ShowSearchLines = true;
+            EdgePolarity = LineEdgePolarity.Positive;
             StrengthType = LineEdgeStrengthType.Gradient1D;
-            SelectionMode = LineSelectionMode.Strongest;
+            SelectionMode = LineSelectionMode.First;
             ScanDirection = LineScanDirection.LeftToRight;
-            FitMode = LineFitMode.Robust;
+            FitMode = LineFitMode.LeastSquares;
         }
 
         /// <summary>
@@ -91,6 +100,36 @@ namespace OpenCvWindowTool
         /// 一维灰度曲线平滑窗口，奇数生效。
         /// </summary>
         public int SmoothSize { get; set; }
+
+        /// <summary>
+        /// 边缘宽度，用于控制一维梯度的计算跨度。
+        /// </summary>
+        public int EdgeWidth { get; set; }
+
+        /// <summary>
+        /// 投影宽度，用于控制每条搜索线两侧参与灰度平均的像素宽度。
+        /// </summary>
+        public int ProjectionWidth { get; set; }
+
+        /// <summary>
+        /// 剔除比例，用于控制拟合前参与外点剔除的强度。
+        /// </summary>
+        public int RejectRatio { get; set; }
+
+        /// <summary>
+        /// 剔除距离，单位为像素。
+        /// </summary>
+        public int RejectDistance { get; set; }
+
+        /// <summary>
+        /// 剖面图对应的搜索线编号，从1开始。
+        /// </summary>
+        public int ProfileLineIndex { get; set; }
+
+        /// <summary>
+        /// 是否显示搜索线。
+        /// </summary>
+        public bool ShowSearchLines { get; set; }
 
         /// <summary>
         /// 边缘极性。
@@ -265,15 +304,18 @@ namespace OpenCvWindowTool
     /// </summary>
     public sealed class LineDetectionResult
     {
-        private LineDetectionResult(bool success, string message, LineDetectionFrame frame, LineScanDirection scanDirection, PointF lineStart, PointF lineEnd, List<LineEdgePoint> edgePoints, TimeSpan elapsed)
+        private LineDetectionResult(bool success, string message, LineDetectionFrame frame, LineScanDirection scanDirection, PointF lineStart, PointF lineMiddle, PointF lineEnd, List<LineEdgePoint> edgePoints, List<LineEdgePoint> firstPoints, List<LineEdgePoint> lastPoints, TimeSpan elapsed)
         {
             Success = success;
             Message = message;
             Frame = frame;
             ScanDirection = scanDirection;
             LineStart = lineStart;
+            LineMiddle = lineMiddle;
             LineEnd = lineEnd;
             EdgePoints = (edgePoints ?? new List<LineEdgePoint>()).AsReadOnly();
+            FirstPoints = (firstPoints ?? new List<LineEdgePoint>()).AsReadOnly();
+            LastPoints = (lastPoints ?? new List<LineEdgePoint>()).AsReadOnly();
             Elapsed = elapsed;
             Angle = success ? CalculateAngle(lineStart, lineEnd) : 0f;
             AverageStrength = EdgePoints.Count == 0 ? 0f : EdgePoints.Average(x => x.Strength);
@@ -290,6 +332,8 @@ namespace OpenCvWindowTool
 
         public PointF LineStart { get; private set; }
 
+        public PointF LineMiddle { get; private set; }
+
         public PointF LineEnd { get; private set; }
 
         public float Angle { get; private set; }
@@ -301,6 +345,10 @@ namespace OpenCvWindowTool
         public TimeSpan Elapsed { get; private set; }
 
         public IReadOnlyList<LineEdgePoint> EdgePoints { get; private set; }
+
+        public IReadOnlyList<LineEdgePoint> FirstPoints { get; private set; }
+
+        public IReadOnlyList<LineEdgePoint> LastPoints { get; private set; }
 
         /// <summary>
         /// 创建成功的直线检测结果。
@@ -314,7 +362,26 @@ namespace OpenCvWindowTool
         /// <returns>成功的直线检测结果。</returns>
         public static LineDetectionResult CreateSuccess(LineDetectionFrame frame, LineScanDirection scanDirection, PointF lineStart, PointF lineEnd, List<LineEdgePoint> edgePoints, TimeSpan elapsed)
         {
-            return new LineDetectionResult(true, "检测成功", frame, scanDirection, lineStart, lineEnd, edgePoints, elapsed);
+            PointF middle = new PointF((lineStart.X + lineEnd.X) * 0.5f, (lineStart.Y + lineEnd.Y) * 0.5f);
+            return new LineDetectionResult(true, "检测成功", frame, scanDirection, lineStart, middle, lineEnd, edgePoints, null, null, elapsed);
+        }
+
+        /// <summary>
+        /// 创建成功的直线检测结果。
+        /// </summary>
+        /// <param name="frame">检测测量框。</param>
+        /// <param name="scanDirection">扫描方向。</param>
+        /// <param name="lineStart">结果线段起点。</param>
+        /// <param name="lineMiddle">结果线段中点。</param>
+        /// <param name="lineEnd">结果线段终点。</param>
+        /// <param name="edgePoints">参与拟合的边缘点。</param>
+        /// <param name="firstPoints">每条搜索线上的第一条边缘点。</param>
+        /// <param name="lastPoints">每条搜索线上的最后一条边缘点。</param>
+        /// <param name="elapsed">检测耗时。</param>
+        /// <returns>成功的直线检测结果。</returns>
+        public static LineDetectionResult CreateSuccess(LineDetectionFrame frame, LineScanDirection scanDirection, PointF lineStart, PointF lineMiddle, PointF lineEnd, List<LineEdgePoint> edgePoints, List<LineEdgePoint> firstPoints, List<LineEdgePoint> lastPoints, TimeSpan elapsed)
+        {
+            return new LineDetectionResult(true, "检测成功", frame, scanDirection, lineStart, lineMiddle, lineEnd, edgePoints, firstPoints, lastPoints, elapsed);
         }
 
         /// <summary>
@@ -328,7 +395,7 @@ namespace OpenCvWindowTool
         /// <returns>失败的直线检测结果。</returns>
         public static LineDetectionResult CreateFailure(string message, LineDetectionFrame frame, LineScanDirection scanDirection, List<LineEdgePoint> edgePoints = null, TimeSpan elapsed = default(TimeSpan))
         {
-            return new LineDetectionResult(false, message, frame, scanDirection, PointF.Empty, PointF.Empty, edgePoints ?? new List<LineEdgePoint>(), elapsed);
+            return new LineDetectionResult(false, message, frame, scanDirection, PointF.Empty, PointF.Empty, PointF.Empty, edgePoints ?? new List<LineEdgePoint>(), null, null, elapsed);
         }
 
         private static float CalculateAngle(PointF start, PointF end)

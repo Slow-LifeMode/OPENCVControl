@@ -29,7 +29,10 @@ namespace OpenCvWindowTool
                 {
                     AddFrame(overlays, result.Frame, statusColor);
                 }
-                AddCaliperPreview(overlays, result.Frame, result.ScanDirection, sampleCount, result.Success ? Color.DeepSkyBlue : statusColor);
+                if (parameters != null && parameters.ShowSearchLines)
+                {
+                    AddCaliperPreview(overlays, result.Frame, result.ScanDirection, sampleCount, result.Success ? Color.DeepSkyBlue : statusColor);
+                }
             }
 
             foreach (LineEdgePoint point in result.EdgePoints)
@@ -48,7 +51,10 @@ namespace OpenCvWindowTool
         {
             List<OverlayItem> overlays = new List<OverlayItem>();
             if (parameters == null || !frame.IsValid) return overlays;
-            AddCaliperPreview(overlays, frame, parameters.ScanDirection, parameters.SampleCount, Color.DeepSkyBlue);
+            if (parameters.ShowSearchLines)
+            {
+                AddCaliperPreview(overlays, frame, parameters.ScanDirection, parameters.SampleCount, Color.DeepSkyBlue);
+            }
             return overlays;
         }
 

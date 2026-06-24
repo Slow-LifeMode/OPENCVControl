@@ -70,6 +70,12 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         private ComboOption<LineFitMode> selectedFitMode;
         private double threshold;
         private double sampleCount;
+        private double edgeWidth;
+        private double projectionWidth;
+        private double rejectRatio;
+        private double rejectDistance;
+        private double profileLineIndex;
+        private bool showSearchLines;
         private string imageStatus;
         private string roiStatus;
         private string liveStatus;
@@ -105,17 +111,24 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
             };
             FitModeOptions = new[]
             {
-                new ComboOption<LineFitMode>("鲁棒拟合", LineFitMode.Robust),
-                new ComboOption<LineFitMode>("最小二乘拟合", LineFitMode.LeastSquares)
+                new ComboOption<LineFitMode>("局部拟合", LineFitMode.Local),
+                new ComboOption<LineFitMode>("最小二乘拟合", LineFitMode.LeastSquares),
+                new ComboOption<LineFitMode>("Huber拟合", LineFitMode.Huber)
             };
 
             currentModule = OperatorModule.Input;
             currentDirection = LineScanDirection.LeftToRight;
-            selectedPolarity = PolarityOptions[2];
-            selectedSelectionMode = SelectionModeOptions[2];
-            selectedFitMode = FitModeOptions[0];
-            threshold = 20d;
-            sampleCount = 40d;
+            selectedPolarity = PolarityOptions[0];
+            selectedSelectionMode = SelectionModeOptions[0];
+            selectedFitMode = FitModeOptions[1];
+            threshold = 30d;
+            sampleCount = 30d;
+            edgeWidth = 1d;
+            projectionWidth = 1d;
+            rejectRatio = 20d;
+            rejectDistance = 5d;
+            profileLineIndex = 1d;
+            showSearchLines = true;
             imageStatus = "未导入图像";
             roiStatus = "未创建ROI";
             liveStatusBrush = Brushes.Red;
@@ -387,6 +400,78 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         }
 
         /// <summary>
+        /// 获取或设置边缘宽度。
+        /// </summary>
+        public double EdgeWidth
+        {
+            get { return edgeWidth; }
+            set
+            {
+                if (SetProperty(ref edgeWidth, value)) RequestDetection();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置投影宽度。
+        /// </summary>
+        public double ProjectionWidth
+        {
+            get { return projectionWidth; }
+            set
+            {
+                if (SetProperty(ref projectionWidth, value)) RequestDetection();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置剔除比例。
+        /// </summary>
+        public double RejectRatio
+        {
+            get { return rejectRatio; }
+            set
+            {
+                if (SetProperty(ref rejectRatio, value)) RequestDetection();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置剔除距离。
+        /// </summary>
+        public double RejectDistance
+        {
+            get { return rejectDistance; }
+            set
+            {
+                if (SetProperty(ref rejectDistance, value)) RequestDetection();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置剖面图搜索线编号。
+        /// </summary>
+        public double ProfileLineIndex
+        {
+            get { return profileLineIndex; }
+            set
+            {
+                if (SetProperty(ref profileLineIndex, value)) RequestDetection();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置是否显示搜索线。
+        /// </summary>
+        public bool ShowSearchLines
+        {
+            get { return showSearchLines; }
+            set
+            {
+                if (SetProperty(ref showSearchLines, value)) RequestDetection();
+            }
+        }
+
+        /// <summary>
         /// 获取或设置图像状态文本。
         /// </summary>
         public string ImageStatus
@@ -531,9 +616,15 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
             {
                 EdgeThreshold = (float)Threshold,
                 SampleCount = Math.Max(2, (int)Math.Round(SampleCount)),
+                EdgeWidth = Math.Max(1, (int)Math.Round(EdgeWidth)),
+                ProjectionWidth = Math.Max(1, (int)Math.Round(ProjectionWidth)),
+                RejectRatio = Math.Max(0, (int)Math.Round(RejectRatio)),
+                RejectDistance = Math.Max(0, (int)Math.Round(RejectDistance)),
+                ProfileLineIndex = Math.Max(1, (int)Math.Round(ProfileLineIndex)),
+                ShowSearchLines = ShowSearchLines,
                 EdgePolarity = SelectedPolarity == null ? LineEdgePolarity.Any : SelectedPolarity.Value,
                 SelectionMode = SelectedSelectionMode == null ? LineSelectionMode.Strongest : SelectedSelectionMode.Value,
-                FitMode = SelectedFitMode == null ? LineFitMode.Robust : SelectedFitMode.Value,
+                FitMode = SelectedFitMode == null ? LineFitMode.Local : SelectedFitMode.Value,
                 ScanDirection = CurrentDirection
             };
         }
