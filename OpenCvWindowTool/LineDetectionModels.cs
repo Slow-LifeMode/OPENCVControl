@@ -65,6 +65,9 @@ namespace OpenCvWindowTool
             SampleCount = 40;
             SampleStep = 1f;
             SmoothSize = 3;
+            EdgeWidth = 1;
+            ProjectionWidth = 1;
+            ShowSearchLines = true;
             EdgePolarity = LineEdgePolarity.Any;
             StrengthType = LineEdgeStrengthType.Gradient1D;
             SelectionMode = LineSelectionMode.Strongest;
@@ -91,6 +94,21 @@ namespace OpenCvWindowTool
         /// 一维灰度曲线平滑窗口，奇数生效。
         /// </summary>
         public int SmoothSize { get; set; }
+
+        /// <summary>
+        /// 边缘宽度，用于控制一维梯度的计算跨度。
+        /// </summary>
+        public int EdgeWidth { get; set; }
+
+        /// <summary>
+        /// 投影宽度，用于控制每条搜索线两侧参与灰度平均的像素宽度。
+        /// </summary>
+        public int ProjectionWidth { get; set; }
+
+        /// <summary>
+        /// 是否显示搜索线。
+        /// </summary>
+        public bool ShowSearchLines { get; set; }
 
         /// <summary>
         /// 边缘极性。

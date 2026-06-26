@@ -196,6 +196,61 @@
                                                   Increment="1"
                                                   ValueKind="Integer" />
 
+                        <TextBlock Text="边缘宽度(像素)" Style="{StaticResource FieldLabelStyle}" />
+                        <controls:NumericInputBox Value="{Binding EdgeWidth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Minimum="1"
+                                                  Maximum="50"
+                                                  Increment="1"
+                                                  ValueKind="Integer" />
+
+                        <TextBlock Text="投影宽度(像素)" Style="{StaticResource FieldLabelStyle}" />
+                        <controls:NumericInputBox Value="{Binding ProjectionWidth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Minimum="1"
+                                                  Maximum="49"
+                                                  Increment="1"
+                                                  ValueKind="Integer" />
+
+                        <TextBlock Text="剔除比例" Style="{StaticResource FieldLabelStyle}" />
+                        <controls:NumericInputBox Value="{Binding RejectRatio, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Minimum="0"
+                                                  Maximum="20"
+                                                  Increment="1"
+                                                  ValueKind="Integer" />
+
+                        <TextBlock Text="剔除距离(像素)" Style="{StaticResource FieldLabelStyle}" />
+                        <controls:NumericInputBox Value="{Binding RejectDistance, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Minimum="0"
+                                                  Maximum="99"
+                                                  Increment="1"
+                                                  ValueKind="Integer" />
+
+                        <TextBlock Text="搜索线编号" Style="{StaticResource FieldLabelStyle}" />
+                        <controls:NumericInputBox Value="{Binding ProfileLineIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Minimum="1"
+                                                  Maximum="500"
+                                                  Increment="1"
+                                                  ValueKind="Integer" />
+
+                        <TextBlock Text="剖面图" Style="{StaticResource FieldLabelStyle}" />
+                        <Border Height="130"
+                                Background="White"
+                                BorderBrush="#D7DCE2"
+                                BorderThickness="1">
+                            <Grid Margin="8">
+                                <Line X1="0"
+                                      Y1="106"
+                                      X2="240"
+                                      Y2="106"
+                                      Stroke="#FF66CC"
+                                      StrokeDashArray="3 3"
+                                      StrokeThickness="1" />
+                            </Grid>
+                        </Border>
+
+                        <CheckBox Content="显示搜索线"
+                                  Margin="0,12,0,0"
+                                  IsChecked="{Binding ShowSearchLines, Mode=TwoWay}" />
+
                         <Border Margin="0,16,0,0"
                                 Padding="10"
                                 Background="#F7F8FA"

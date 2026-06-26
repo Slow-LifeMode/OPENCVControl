@@ -70,6 +70,9 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         private ComboOption<LineFitMode> selectedFitMode;
         private double threshold;
         private double sampleCount;
+        private double edgeWidth;
+        private double projectionWidth;
+        private bool showSearchLines;
         private string imageStatus;
         private string roiStatus;
         private string liveStatus;
@@ -116,6 +119,9 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
             selectedFitMode = FitModeOptions[0];
             threshold = 20d;
             sampleCount = 40d;
+            edgeWidth = 1d;
+            projectionWidth = 1d;
+            showSearchLines = true;
             imageStatus = "未导入图像";
             roiStatus = "未创建ROI";
             liveStatusBrush = Brushes.Red;
@@ -387,6 +393,42 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         }
 
         /// <summary>
+        /// 获取或设置边缘宽度。
+        /// </summary>
+        public double EdgeWidth
+        {
+            get { return edgeWidth; }
+            set
+            {
+                if (SetProperty(ref edgeWidth, value)) RequestDetection();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置投影宽度。
+        /// </summary>
+        public double ProjectionWidth
+        {
+            get { return projectionWidth; }
+            set
+            {
+                if (SetProperty(ref projectionWidth, value)) RequestDetection();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置是否显示搜索线。
+        /// </summary>
+        public bool ShowSearchLines
+        {
+            get { return showSearchLines; }
+            set
+            {
+                if (SetProperty(ref showSearchLines, value)) RequestDetection();
+            }
+        }
+
+        /// <summary>
         /// 获取或设置图像状态文本。
         /// </summary>
         public string ImageStatus
@@ -531,6 +573,9 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
             {
                 EdgeThreshold = (float)Threshold,
                 SampleCount = Math.Max(2, (int)Math.Round(SampleCount)),
+                EdgeWidth = Math.Max(1, (int)Math.Round(EdgeWidth)),
+                ProjectionWidth = Math.Max(1, (int)Math.Round(ProjectionWidth)),
+                ShowSearchLines = ShowSearchLines,
                 EdgePolarity = SelectedPolarity == null ? LineEdgePolarity.Any : SelectedPolarity.Value,
                 SelectionMode = SelectedSelectionMode == null ? LineSelectionMode.Strongest : SelectedSelectionMode.Value,
                 FitMode = SelectedFitMode == null ? LineFitMode.Robust : SelectedFitMode.Value,

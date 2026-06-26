@@ -34,7 +34,7 @@ namespace OpenCvWindowTool
         public LineDetectionResult Detect(LineDetectionImageContext context, RoiItem roi, LineDetectionParams parameters)
         {
             LineDetectionParams actualParams = NormalizeParams(parameters);
-            if (context == null || context.GrayImage == null || context.GrayImage.Empty())
+            if (context == null || context.GrayImage == null || context.GrayImage.Empty() || context.GrayPixels == null)
             {
                 return LineDetectionResult.CreateFailure("当前没有可检测的图像。", default(LineDetectionFrame), actualParams.ScanDirection);
             }
@@ -49,7 +49,7 @@ namespace OpenCvWindowTool
 
             Stopwatch stopwatch = Stopwatch.StartNew();
             LineDetectionFrame frame = roi.ToLineDetectionFrame();
-            List<LineEdgePoint> edgePoints = CollectEdgePoints(context.GrayImage, frame, actualParams);
+            List<LineEdgePoint> edgePoints = CollectEdgePoints(context, frame, actualParams);
             if (edgePoints.Count < 2)
             {
                 return LineDetectionResult.CreateFailure("有效检测点不足，无法拟合直线。", frame, actualParams.ScanDirection, edgePoints, stopwatch.Elapsed);
@@ -67,18 +67,30 @@ namespace OpenCvWindowTool
                 EdgeThreshold = Math.Max(0f, source.EdgeThreshold),
                 SampleCount = Math.Max(2, source.SampleCount),
                 SampleStep = Math.Max(0.5f, source.SampleStep),
-                SmoothSize = Math.Max(1, source.SmoothSize),
+                SmoothSize = MakeOdd(Math.Max(1, source.SmoothSize)),
+                EdgeWidth = Math.Max(1, source.EdgeWidth),
+                ProjectionWidth = MakeOdd(Math.Max(1, source.ProjectionWidth)),
+                ShowSearchLines = source.ShowSearchLines,
                 EdgePolarity = source.EdgePolarity,
                 StrengthType = source.StrengthType,
                 SelectionMode = source.SelectionMode,
                 ScanDirection = source.ScanDirection,
                 FitMode = source.FitMode
             };
-            if (result.SmoothSize % 2 == 0) result.SmoothSize++;
             return result;
         }
 
-        private static List<LineEdgePoint> CollectEdgePoints(Mat gray, LineDetectionFrame frame, LineDetectionParams parameters)
+        /// <summary>
+        /// 把输入数值调整为奇数。
+        /// </summary>
+        /// <param name="value">输入数值。</param>
+        /// <returns>奇数数值。</returns>
+        private static int MakeOdd(int value)
+        {
+            return value % 2 == 0 ? value + 1 : value;
+        }
+
+        private static List<LineEdgePoint> CollectEdgePoints(LineDetectionImageContext context, LineDetectionFrame frame, LineDetectionParams parameters)
         {
             //扫描方向
             PointF scanDir = frame.GetScanDirection(parameters.ScanDirection);
@@ -89,104 +101,355 @@ namespace OpenCvWindowTool
             //ROI宽
             float scanLength = frame.GetScanLength(parameters.ScanDirection);
             //切割之后每个扫描卡尺宽度的一半
-            float caliperHalfWidth = Math.Max(0.5f, arrangeLength / Math.Max(1, parameters.SampleCount) * 0.5f);
+            float arrangeStart = -arrangeLength / 2f;
             //第一个卡尺相对中心点的起始偏移量
-            float arrangeStart = -arrangeLength / 2f + caliperHalfWidth;
-            float arrangeEnd = arrangeLength / 2f - caliperHalfWidth;
             //每个卡尺之间的固定步长
-            float arrangeStep = parameters.SampleCount == 1 ? 0f : (arrangeEnd - arrangeStart) / (parameters.SampleCount - 1);
+            float arrangeStep = arrangeLength / parameters.SampleCount;
 
             // 优化：预计算ROI区域的Sobel梯度，只计算一次
-            Mat gradMat = null;
-            Rect roiRect = GetRoiBoundingRect(gray, frame, parameters);
-            
-            if (parameters.StrengthType == LineEdgeStrengthType.Sobel)
-            {
-                gradMat = new Mat();
-                using (Mat roiMat = new Mat(gray, roiRect))
-                using (Mat sobelX = new Mat())
-                using (Mat sobelY = new Mat())
-                {
-                    Cv2.Sobel(roiMat, sobelX, MatType.CV_32F, 1, 0, 3);
-                    Cv2.Sobel(roiMat, sobelY, MatType.CV_32F, 0, 1, 3);
-                    Cv2.AddWeighted(sobelX, scanDir.X, sobelY, scanDir.Y, 0, gradMat);
-                }
-            }
-
-            try
-            {
-                List<List<CaliperCandidate>> candidateGroups = new List<List<CaliperCandidate>>(parameters.SampleCount);
+            List<List<CaliperCandidate>> candidateGroups = new List<List<CaliperCandidate>>(parameters.SampleCount);
                 
-                for (int i = 0; i < parameters.SampleCount; i++)
-                {
-                    float along = arrangeStart + arrangeStep * i;
-                    PointF center = new PointF(frame.Center.X + arrangeDir.X * along, frame.Center.Y + arrangeDir.Y * along);
-                    List<CaliperCandidate> candidates = DetectOneCaliperOptimized(gray, gradMat, center, scanDir, arrangeDir, scanLength, caliperHalfWidth, i, parameters, roiRect);
-                    
-                    if (candidates.Count > 10)
-                    {
-                        switch (parameters.SelectionMode)
-                        {
-                            case LineSelectionMode.First:
-                                candidates = candidates.OrderBy(c => c.Offset).Take(3).ToList();
-                                break;
-                            case LineSelectionMode.Last:
-                                candidates = candidates.OrderByDescending(c => c.Offset).Take(3).ToList();
-                                break;
-                            default:
-                                candidates = candidates.OrderByDescending(c => c.Strength).Take(3).ToList();
-                                break;
-                        }
-                    }
-                    candidateGroups.Add(candidates);
-                }
-
-                return parameters.SelectionMode == LineSelectionMode.Strongest
-                    ? SelectGloballyConsistentPointsOptimized(candidateGroups, frame, parameters)
-                    : SelectOrderedConsistentPointsOptimized(candidateGroups, frame, parameters);
-            }
-            finally
+            for (int i = 0; i < parameters.SampleCount; i++)
             {
-                gradMat?.Dispose();
+                float along = arrangeStart + arrangeStep * (i + 0.5f);
+                PointF center = new PointF(frame.Center.X + arrangeDir.X * along, frame.Center.Y + arrangeDir.Y * along);
+                List<CaliperCandidate> candidates = DetectOneSearchLine(context, center, scanDir, arrangeDir, scanLength, i, parameters);
+                    
+                if (candidates.Count > 10)
+                {
+                    switch (parameters.SelectionMode)
+                    {
+                        case LineSelectionMode.First:
+                            candidates = candidates.OrderBy(c => c.Offset).Take(3).ToList();
+                            break;
+                        case LineSelectionMode.Last:
+                            candidates = candidates.OrderByDescending(c => c.Offset).Take(3).ToList();
+                            break;
+                        default:
+                            candidates = candidates.OrderByDescending(c => c.Strength).Take(3).ToList();
+                            break;
+                    }
+                }
+                candidateGroups.Add(candidates);
+            }
+
+            return parameters.SelectionMode == LineSelectionMode.Strongest
+                ? SelectGloballyConsistentPointsOptimized(candidateGroups, frame, parameters)
+                : SelectOrderedConsistentPointsOptimized(candidateGroups, frame, parameters);
+        }
+
+        /// <summary>
+        /// 在单条搜索线上提取候选边缘点。
+        /// </summary>
+        /// <param name="context">灰度图上下文。</param>
+        /// <param name="center">搜索线中心点。</param>
+        /// <param name="scanDir">扫描方向。</param>
+        /// <param name="widthDir">投影宽度方向。</param>
+        /// <param name="scanLength">扫描长度。</param>
+        /// <param name="lineIndex">搜索线编号，从0开始。</param>
+        /// <param name="parameters">检测参数。</param>
+        /// <returns>候选边缘点集合。</returns>
+        private static List<CaliperCandidate> DetectOneSearchLine(LineDetectionImageContext context, PointF center, PointF scanDir, PointF widthDir, float scanLength, int lineIndex, LineDetectionParams parameters)
+        {
+            int sampleCount = Math.Max(5, (int)Math.Ceiling(scanLength / parameters.SampleStep) + 1);
+            float sampleStep = scanLength / Math.Max(1, sampleCount - 1);
+            float scanStart = -scanLength / 2f;
+            float[] profile = new float[sampleCount];
+            float[] offsets = new float[sampleCount];
+            bool[] valid = new bool[sampleCount];
+
+            for (int i = 0; i < sampleCount; i++)
+            {
+                float offset = scanStart + sampleStep * i;
+                PointF point = new PointF(center.X + scanDir.X * offset, center.Y + scanDir.Y * offset);
+                offsets[i] = offset;
+                if (TryReadProjectedGray(context, point, widthDir, parameters.ProjectionWidth, out float gray))
+                {
+                    profile[i] = gray;
+                    valid[i] = true;
+                }
+            }
+
+            FillInvalidSamples(profile, valid);
+            if (parameters.SmoothSize > 1)
+            {
+                Smooth(profile, parameters.SmoothSize);
+            }
+
+            return FindCandidates(profile, offsets, valid, center, scanDir, lineIndex, parameters);
+        }
+
+        /// <summary>
+        /// 读取指定点附近投影宽度内的平均灰度。
+        /// </summary>
+        /// <param name="context">灰度图上下文。</param>
+        /// <param name="center">投影中心点。</param>
+        /// <param name="widthDir">投影宽度方向。</param>
+        /// <param name="projectionWidth">投影宽度。</param>
+        /// <param name="gray">平均灰度。</param>
+        /// <returns>成功读取至少一个像素时返回true。</returns>
+        private static bool TryReadProjectedGray(LineDetectionImageContext context, PointF center, PointF widthDir, int projectionWidth, out float gray)
+        {
+            int half = projectionWidth / 2;
+            float sum = 0f;
+            int count = 0;
+
+            for (int i = -half; i <= half; i++)
+            {
+                float px = center.X + widthDir.X * i;
+                float py = center.Y + widthDir.Y * i;
+                if (TryReadGray(context, px, py, out float value))
+                {
+                    sum += value;
+                    count++;
+                }
+            }
+
+            gray = count == 0 ? 0f : sum / count;
+            return count > 0;
+        }
+
+        /// <summary>
+        /// 双线性读取灰度值。
+        /// </summary>
+        /// <param name="context">灰度图上下文。</param>
+        /// <param name="x">图像X坐标。</param>
+        /// <param name="y">图像Y坐标。</param>
+        /// <param name="value">灰度值。</param>
+        /// <returns>坐标在图像内时返回true。</returns>
+        private static bool TryReadGray(LineDetectionImageContext context, float x, float y, out float value)
+        {
+            value = 0f;
+            if (x < 0f || y < 0f || x > context.Width - 1 || y > context.Height - 1) return false;
+
+            int x0 = (int)Math.Floor(x);
+            int y0 = (int)Math.Floor(y);
+            int x1 = Math.Min(context.Width - 1, x0 + 1);
+            int y1 = Math.Min(context.Height - 1, y0 + 1);
+            float fx = x - x0;
+            float fy = y - y0;
+            float v00 = ReadPixel(context, x0, y0);
+            float v10 = ReadPixel(context, x1, y0);
+            float v01 = ReadPixel(context, x0, y1);
+            float v11 = ReadPixel(context, x1, y1);
+            float top = v00 + (v10 - v00) * fx;
+            float bottom = v01 + (v11 - v01) * fx;
+            value = top + (bottom - top) * fy;
+            return true;
+        }
+
+        /// <summary>
+        /// 读取单个像素灰度。
+        /// </summary>
+        /// <param name="context">灰度图上下文。</param>
+        /// <param name="x">像素X坐标。</param>
+        /// <param name="y">像素Y坐标。</param>
+        /// <returns>灰度值。</returns>
+        private static byte ReadPixel(LineDetectionImageContext context, int x, int y)
+        {
+            return context.GrayPixels[y * context.Width + x];
+        }
+
+        /// <summary>
+        /// 用最近有效样本补齐无效采样点。
+        /// </summary>
+        /// <param name="profile">灰度剖面。</param>
+        /// <param name="valid">有效标记。</param>
+        private static void FillInvalidSamples(float[] profile, bool[] valid)
+        {
+            float last = 0f;
+            bool hasLast = false;
+            for (int i = 0; i < profile.Length; i++)
+            {
+                if (valid[i])
+                {
+                    last = profile[i];
+                    hasLast = true;
+                }
+                else if (hasLast)
+                {
+                    profile[i] = last;
+                }
+            }
+
+            float next = 0f;
+            bool hasNext = false;
+            for (int i = profile.Length - 1; i >= 0; i--)
+            {
+                if (valid[i])
+                {
+                    next = profile[i];
+                    hasNext = true;
+                }
+                else if (hasNext)
+                {
+                    profile[i] = next;
+                    valid[i] = true;
+                }
             }
         }
 
-        private static Rect GetRoiBoundingRect(Mat gray, LineDetectionFrame frame, LineDetectionParams parameters)
+        /// <summary>
+        /// 对一维剖面执行滑动平均平滑。
+        /// </summary>
+        /// <param name="profile">灰度剖面。</param>
+        /// <param name="size">窗口大小。</param>
+        private static void Smooth(float[] profile, int size)
         {
-            PointF scanDir = frame.GetScanDirection(parameters.ScanDirection);
-            PointF arrangeDir = frame.GetLineArrangeDirection(parameters.ScanDirection);
-            float arrangeLength = frame.GetArrangeLength(parameters.ScanDirection);
-            float scanLength = frame.GetScanLength(parameters.ScanDirection);
-            
-            PointF center = frame.Center;
-            float halfArrange = arrangeLength / 2f;
-            float halfScan = scanLength / 2f;
-            
-            float minX = float.MaxValue, minY = float.MaxValue;
-            float maxX = float.MinValue, maxY = float.MinValue;
-            
-            for (int i = -1; i <= 1; i += 2)
+            if (profile.Length == 0 || size <= 1) return;
+
+            int half = size / 2;
+            float[] source = (float[])profile.Clone();
+            float[] prefix = new float[source.Length + 1];
+            for (int i = 0; i < source.Length; i++)
             {
-                for (int j = -1; j <= 1; j += 2)
+                prefix[i + 1] = prefix[i] + source[i];
+            }
+
+            for (int i = 0; i < source.Length; i++)
+            {
+                int start = Math.Max(0, i - half);
+                int end = Math.Min(source.Length, i + half + 1);
+                profile[i] = (prefix[end] - prefix[start]) / Math.Max(1, end - start);
+            }
+        }
+
+        /// <summary>
+        /// 从一维剖面中查找候选边缘。
+        /// </summary>
+        /// <param name="profile">灰度剖面。</param>
+        /// <param name="offsets">扫描偏移。</param>
+        /// <param name="valid">有效标记。</param>
+        /// <param name="center">搜索线中心点。</param>
+        /// <param name="scanDir">扫描方向。</param>
+        /// <param name="lineIndex">搜索线编号。</param>
+        /// <param name="parameters">检测参数。</param>
+        /// <returns>候选边缘集合。</returns>
+        private static List<CaliperCandidate> FindCandidates(float[] profile, float[] offsets, bool[] valid, PointF center, PointF scanDir, int lineIndex, LineDetectionParams parameters)
+        {
+            List<CaliperCandidate> candidates = new List<CaliperCandidate>();
+            CaliperCandidate fallback = CaliperCandidate.Invalid;
+            int width = Math.Max(1, parameters.EdgeWidth);
+            float[] gradients = BuildCaliperGradients(profile, valid, width);
+            for (int i = width; i < profile.Length - width; i++)
+            {
+                if (!valid[i]) continue;
+
+                float gradient = gradients[i];
+                float strength = Math.Abs(gradient);
+                if (strength < parameters.EdgeThreshold) continue;
+                if (!MatchPolarity(gradient, parameters.EdgePolarity)) continue;
+
+                float offset = offsets[i];
+                PointF point = new PointF(center.X + scanDir.X * offset, center.Y + scanDir.Y * offset);
+                CaliperCandidate candidate = new CaliperCandidate(point, offset, strength, lineIndex);
+                if (!fallback.IsValid || candidate.Strength > fallback.Strength)
                 {
-                    PointF corner = new PointF(
-                        center.X + arrangeDir.X * halfArrange * i + scanDir.X * halfScan * j,
-                        center.Y + arrangeDir.Y * halfArrange * i + scanDir.Y * halfScan * j
-                    );
-                    minX = Math.Min(minX, corner.X);
-                    minY = Math.Min(minY, corner.Y);
-                    maxX = Math.Max(maxX, corner.X);
-                    maxY = Math.Max(maxY, corner.Y);
+                    fallback = candidate;
+                }
+                if (IsLocalGradientPeak(gradients, i, width))
+                {
+                    candidates.Add(candidate);
                 }
             }
-            
-            int padding = 10;
-            int x = Math.Max(0, (int)Math.Floor(minX) - padding);
-            int y = Math.Max(0, (int)Math.Floor(minY) - padding);
-            int width = Math.Min(gray.Width - x, (int)Math.Ceiling(maxX) - x + padding * 2);
-            int height = Math.Min(gray.Height - y, (int)Math.Ceiling(maxY) - y + padding * 2);
-            
-            return new Rect(x, y, Math.Max(1, width), Math.Max(1, height));
+
+            if (candidates.Count == 0 && fallback.IsValid)
+            {
+                candidates.Add(fallback);
+            }
+
+            candidates.Sort((a, b) => a.Offset.CompareTo(b.Offset));
+            return MergeNearbyCandidates(candidates, parameters.EdgeWidth);
+        }
+
+        /// <summary>
+        /// 按卡尺边缘宽度计算一维灰度剖面的左右窗口梯度。
+        /// </summary>
+        /// <param name="profile">灰度剖面。</param>
+        /// <param name="valid">有效采样标记。</param>
+        /// <param name="edgeWidth">边缘宽度。</param>
+        /// <returns>每个采样位置的梯度。</returns>
+        private static float[] BuildCaliperGradients(float[] profile, bool[] valid, int edgeWidth)
+        {
+            float[] gradients = new float[profile.Length];
+            if (profile.Length == 0) return gradients;
+
+            float[] prefix = new float[profile.Length + 1];
+            int[] validPrefix = new int[profile.Length + 1];
+            for (int i = 0; i < profile.Length; i++)
+            {
+                prefix[i + 1] = prefix[i] + profile[i];
+                validPrefix[i + 1] = validPrefix[i] + (valid[i] ? 1 : 0);
+            }
+
+            int width = Math.Max(1, edgeWidth);
+            for (int i = width; i < profile.Length - width; i++)
+            {
+                int leftStart = i - width;
+                int leftEnd = i;
+                int rightStart = i + 1;
+                int rightEnd = i + width + 1;
+                int leftCount = validPrefix[leftEnd] - validPrefix[leftStart];
+                int rightCount = validPrefix[rightEnd] - validPrefix[rightStart];
+                if (leftCount == 0 || rightCount == 0) continue;
+
+                float leftMean = (prefix[leftEnd] - prefix[leftStart]) / leftCount;
+                float rightMean = (prefix[rightEnd] - prefix[rightStart]) / rightCount;
+                gradients[i] = rightMean - leftMean;
+            }
+
+            return gradients;
+        }
+
+        /// <summary>
+        /// 判断指定梯度点是否为局部峰值。
+        /// </summary>
+        /// <param name="gradients">梯度数组。</param>
+        /// <param name="index">采样索引。</param>
+        /// <param name="edgeWidth">边缘宽度。</param>
+        /// <returns>是局部峰值时返回true。</returns>
+        private static bool IsLocalGradientPeak(float[] gradients, int index, int edgeWidth)
+        {
+            float current = Math.Abs(gradients[index]);
+            int radius = Math.Max(1, edgeWidth / 2);
+            int start = Math.Max(0, index - radius);
+            int end = Math.Min(gradients.Length - 1, index + radius);
+            for (int i = start; i <= end; i++)
+            {
+                if (i == index) continue;
+                if (Math.Abs(gradients[i]) > current) return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 合并同一搜索线中距离过近的候选边缘。
+        /// </summary>
+        /// <param name="candidates">候选边缘集合。</param>
+        /// <param name="minimumDistance">最小距离。</param>
+        /// <returns>合并后的候选边缘集合。</returns>
+        private static List<CaliperCandidate> MergeNearbyCandidates(List<CaliperCandidate> candidates, int minimumDistance)
+        {
+            if (candidates.Count <= 1) return candidates;
+
+            List<CaliperCandidate> result = new List<CaliperCandidate>();
+            CaliperCandidate current = candidates[0];
+            for (int i = 1; i < candidates.Count; i++)
+            {
+                CaliperCandidate candidate = candidates[i];
+                if (Math.Abs(candidate.Offset - current.Offset) <= minimumDistance)
+                {
+                    if (candidate.Strength > current.Strength) current = candidate;
+                }
+                else
+                {
+                    result.Add(current);
+                    current = candidate;
+                }
+            }
+            result.Add(current);
+            return result;
         }
 
         /// <summary>
