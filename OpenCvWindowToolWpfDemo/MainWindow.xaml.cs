@@ -34,6 +34,7 @@ namespace OpenCvWindowToolWpfDemo
             viewer.SelectedRoiChanged += Viewer_SelectedRoiChanged;
             FormsHost.Child = viewer;
 
+            viewModel.SetRoiGeometry(null);
             RefreshLineDisplay(false);
         }
 
@@ -48,6 +49,7 @@ namespace OpenCvWindowToolWpfDemo
             viewModel.ClearRoiRequested += ClearRoi;
             viewModel.PreviewRequested += () => RefreshLineDisplay(false);
             viewModel.DetectRequested += () => RefreshLineDisplay(true);
+            viewModel.RoiGeometryChanged += ApplyRoiGeometryFromViewModel;
         }
 
         /// <summary>
@@ -111,6 +113,7 @@ namespace OpenCvWindowToolWpfDemo
             viewer.ClearLineDetectionResult();
             latestResult = null;
             viewModel.RoiStatus = "未创建ROI";
+            viewModel.SetRoiGeometry(null);
             viewModel.SetResult(null);
         }
 
@@ -122,6 +125,7 @@ namespace OpenCvWindowToolWpfDemo
         private void Viewer_RoiChanged(object sender, RoiEventArgs e)
         {
             viewModel.RoiStatus = viewer.SelectedRoi == null ? "未选择ROI" : viewer.SelectedRoi.Name;
+            viewModel.SetRoiGeometry(viewer.SelectedRoi);
             if (refreshingLineDisplay) return;
             RefreshLineDisplay(false);
         }
@@ -134,6 +138,7 @@ namespace OpenCvWindowToolWpfDemo
         private void Viewer_RoiEditCompleted(object sender, RoiEventArgs e)
         {
             viewModel.RoiStatus = viewer.SelectedRoi == null ? "未选择ROI" : viewer.SelectedRoi.Name;
+            viewModel.SetRoiGeometry(viewer.SelectedRoi);
             RefreshLineDisplay(true);
         }
 
@@ -145,7 +150,23 @@ namespace OpenCvWindowToolWpfDemo
         private void Viewer_SelectedRoiChanged(object sender, EventArgs e)
         {
             viewModel.RoiStatus = viewer.SelectedRoi == null ? "未选择ROI" : viewer.SelectedRoi.Name;
+            viewModel.SetRoiGeometry(viewer.SelectedRoi);
             RefreshLineDisplay(false);
+        }
+
+        /// <summary>
+        /// 将界面上的ROI几何参数写回当前ROI。
+        /// </summary>
+        private void ApplyRoiGeometryFromViewModel()
+        {
+            RoiItem roi = viewer.SelectedRoi;
+            if (roi == null) return;
+
+            roi.Center = new System.Drawing.PointF((float)viewModel.RoiCenterX, (float)viewModel.RoiCenterY);
+            roi.Width = (float)Math.Max(4d, viewModel.RoiWidth);
+            roi.Height = (float)Math.Max(4d, viewModel.RoiHeight);
+            roi.Angle = (float)viewModel.RoiAngle;
+            RefreshLineDisplay(true);
         }
 
         /// <summary>
@@ -168,6 +189,7 @@ namespace OpenCvWindowToolWpfDemo
                     latestResult = null;
                     viewer.ClearLineDetectionPreview();
                     viewer.ClearLineDetectionResult();
+                    viewModel.SetRoiGeometry(null);
                     viewModel.SetResult(null);
                     return;
                 }

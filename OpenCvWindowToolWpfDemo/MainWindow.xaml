@@ -140,6 +140,47 @@
                         <Button Content="清除ROI"
                                 Style="{StaticResource ActionButtonStyle}"
                                 Command="{Binding ClearRoiCommand}" />
+
+                        <TextBlock Text="中心点X" Style="{StaticResource FieldLabelStyle}" />
+                        <controls:NumericInputBox Value="{Binding RoiCenterX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Minimum="-100000"
+                                                  Maximum="100000"
+                                                  Increment="1"
+                                                  ValueKind="Float"
+                                                  IsEnabled="{Binding HasRoiGeometry}" />
+
+                        <TextBlock Text="中心点Y" Style="{StaticResource FieldLabelStyle}" />
+                        <controls:NumericInputBox Value="{Binding RoiCenterY, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Minimum="-100000"
+                                                  Maximum="100000"
+                                                  Increment="1"
+                                                  ValueKind="Float"
+                                                  IsEnabled="{Binding HasRoiGeometry}" />
+
+                        <TextBlock Text="宽度" Style="{StaticResource FieldLabelStyle}" />
+                        <controls:NumericInputBox Value="{Binding RoiWidth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Minimum="4"
+                                                  Maximum="100000"
+                                                  Increment="1"
+                                                  ValueKind="Float"
+                                                  IsEnabled="{Binding HasRoiGeometry}" />
+
+                        <TextBlock Text="高度" Style="{StaticResource FieldLabelStyle}" />
+                        <controls:NumericInputBox Value="{Binding RoiHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Minimum="4"
+                                                  Maximum="100000"
+                                                  Increment="1"
+                                                  ValueKind="Float"
+                                                  IsEnabled="{Binding HasRoiGeometry}" />
+
+                        <TextBlock Text="角度" Style="{StaticResource FieldLabelStyle}" />
+                        <controls:NumericInputBox Value="{Binding RoiAngle, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Minimum="-360"
+                                                  Maximum="360"
+                                                  Increment="1"
+                                                  ValueKind="Float"
+                                                  IsEnabled="{Binding HasRoiGeometry}" />
+
                         <TextBlock Margin="0,12,0,0"
                                    Foreground="#666666"
                                    Text="{Binding RoiStatus}"

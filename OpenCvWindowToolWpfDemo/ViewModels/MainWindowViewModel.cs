@@ -75,6 +75,13 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         private double rejectRatio;
         private double rejectDistance;
         private double profileLineIndex;
+        private double roiCenterX;
+        private double roiCenterY;
+        private double roiWidth;
+        private double roiHeight;
+        private double roiAngle;
+        private bool hasRoiGeometry;
+        private bool updatingRoiGeometry;
         private bool showSearchLines;
         private string imageStatus;
         private string roiStatus;
@@ -185,6 +192,11 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         /// 请求执行直线检测时触发。
         /// </summary>
         public event Action DetectRequested;
+
+        /// <summary>
+        /// 请求回写ROI几何参数时触发。
+        /// </summary>
+        public event Action RoiGeometryChanged;
 
         /// <summary>
         /// 获取边缘极性选项。
@@ -472,6 +484,75 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         }
 
         /// <summary>
+        /// 获取当前是否有可编辑ROI。
+        /// </summary>
+        public bool HasRoiGeometry
+        {
+            get { return hasRoiGeometry; }
+            private set { SetProperty(ref hasRoiGeometry, value); }
+        }
+
+        /// <summary>
+        /// 获取或设置ROI中心点X。
+        /// </summary>
+        public double RoiCenterX
+        {
+            get { return roiCenterX; }
+            set
+            {
+                if (SetProperty(ref roiCenterX, value)) RequestRoiGeometryChange();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置ROI中心点Y。
+        /// </summary>
+        public double RoiCenterY
+        {
+            get { return roiCenterY; }
+            set
+            {
+                if (SetProperty(ref roiCenterY, value)) RequestRoiGeometryChange();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置ROI宽度。
+        /// </summary>
+        public double RoiWidth
+        {
+            get { return roiWidth; }
+            set
+            {
+                if (SetProperty(ref roiWidth, value)) RequestRoiGeometryChange();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置ROI高度。
+        /// </summary>
+        public double RoiHeight
+        {
+            get { return roiHeight; }
+            set
+            {
+                if (SetProperty(ref roiHeight, value)) RequestRoiGeometryChange();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置ROI角度。
+        /// </summary>
+        public double RoiAngle
+        {
+            get { return roiAngle; }
+            set
+            {
+                if (SetProperty(ref roiAngle, value)) RequestRoiGeometryChange();
+            }
+        }
+
+        /// <summary>
         /// 获取或设置图像状态文本。
         /// </summary>
         public string ImageStatus
@@ -630,6 +711,28 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         }
 
         /// <summary>
+        /// 按当前ROI刷新界面上的几何参数。
+        /// </summary>
+        /// <param name="roi">当前ROI。</param>
+        public void SetRoiGeometry(RoiItem roi)
+        {
+            updatingRoiGeometry = true;
+            try
+            {
+                HasRoiGeometry = roi != null;
+                RoiCenterX = roi == null ? 0d : roi.Center.X;
+                RoiCenterY = roi == null ? 0d : roi.Center.Y;
+                RoiWidth = roi == null ? 0d : roi.Width;
+                RoiHeight = roi == null ? 0d : roi.Height;
+                RoiAngle = roi == null ? 0d : roi.Angle;
+            }
+            finally
+            {
+                updatingRoiGeometry = false;
+            }
+        }
+
+        /// <summary>
         /// 根据检测结果更新界面文本。
         /// </summary>
         /// <param name="result">检测结果，为null时显示未检测。</param>
@@ -702,6 +805,15 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         private void RequestDetection()
         {
             DetectRequested?.Invoke();
+        }
+
+        /// <summary>
+        /// 请求回写ROI几何参数。
+        /// </summary>
+        private void RequestRoiGeometryChange()
+        {
+            if (updatingRoiGeometry) return;
+            RoiGeometryChanged?.Invoke();
         }
 
         /// <summary>
