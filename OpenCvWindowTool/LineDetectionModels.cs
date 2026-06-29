@@ -50,8 +50,11 @@ namespace OpenCvWindowTool
     /// </summary>
     public enum LineFitMode
     {
-        Robust,
-        LeastSquares
+        Local,
+        LeastSquares,
+        Huber,
+        Ransac,
+        Robust = Huber
     }
 
     /// <summary>
@@ -67,12 +70,14 @@ namespace OpenCvWindowTool
             SmoothSize = 3;
             EdgeWidth = 1;
             ProjectionWidth = 1;
+            RejectRatio = 20;
+            RejectDistance = 5;
             ShowSearchLines = true;
             EdgePolarity = LineEdgePolarity.Any;
             StrengthType = LineEdgeStrengthType.Gradient1D;
             SelectionMode = LineSelectionMode.Strongest;
             ScanDirection = LineScanDirection.LeftToRight;
-            FitMode = LineFitMode.Robust;
+            FitMode = LineFitMode.LeastSquares;
         }
 
         /// <summary>
@@ -104,6 +109,16 @@ namespace OpenCvWindowTool
         /// 投影宽度，用于控制每条搜索线两侧参与灰度平均的像素宽度。
         /// </summary>
         public int ProjectionWidth { get; set; }
+
+        /// <summary>
+        /// 剔除比例，限制最多可剔除的外点比例。
+        /// </summary>
+        public int RejectRatio { get; set; }
+
+        /// <summary>
+        /// 剔除距离，单位为像素。
+        /// </summary>
+        public int RejectDistance { get; set; }
 
         /// <summary>
         /// 是否显示搜索线。

@@ -55,7 +55,13 @@ namespace OpenCvWindowTool
                 return LineDetectionResult.CreateFailure("有效检测点不足，无法拟合直线。", frame, actualParams.ScanDirection, edgePoints, stopwatch.Elapsed);
             }
 
-            PointF[] line = FitLine(frame, actualParams, edgePoints);
+            List<LineEdgePoint> fittingPoints = RejectOutliers(edgePoints, actualParams);
+            if (fittingPoints.Count < 2)
+            {
+                fittingPoints = edgePoints;
+            }
+
+            PointF[] line = FitLine(frame, actualParams, fittingPoints);
             return LineDetectionResult.CreateSuccess(frame, actualParams.ScanDirection, line[0], line[1], edgePoints, stopwatch.Elapsed);
         }
 
@@ -70,6 +76,8 @@ namespace OpenCvWindowTool
                 SmoothSize = MakeOdd(Math.Max(1, source.SmoothSize)),
                 EdgeWidth = Math.Max(1, source.EdgeWidth),
                 ProjectionWidth = MakeOdd(Math.Max(1, source.ProjectionWidth)),
+                RejectRatio = Math.Min(99, Math.Max(0, source.RejectRatio)),
+                RejectDistance = Math.Min(20, Math.Max(0, source.RejectDistance)),
                 ShowSearchLines = source.ShowSearchLines,
                 EdgePolarity = source.EdgePolarity,
                 StrengthType = source.StrengthType,
@@ -1078,15 +1086,61 @@ namespace OpenCvWindowTool
             }
         }
 
+        /// <summary>
+        /// 按剔除距离和剔除比例过滤拟合外点。
+        /// </summary>
+        /// <param name="points">原始检测点集合。</param>
+        /// <param name="parameters">直线检测参数。</param>
+        /// <returns>过滤后的检测点集合。</returns>
+        private static List<LineEdgePoint> RejectOutliers(List<LineEdgePoint> points, LineDetectionParams parameters)
+        {
+            if (points.Count < 3 || parameters.RejectDistance <= 0 || parameters.RejectRatio <= 0) return points;
+
+            FittedLine line = FitByLeastSquares(points);
+            if (!line.IsValid) return points;
+
+            List<PointDistance> distances = new List<PointDistance>(points.Count);
+            foreach (LineEdgePoint point in points)
+            {
+                distances.Add(new PointDistance(point, DistanceToLine(point.Point, line)));
+            }
+
+            int maxRemoveCount = (int)Math.Floor(points.Count * parameters.RejectRatio / 100f);
+            maxRemoveCount = Math.Min(points.Count - 2, Math.Max(0, maxRemoveCount));
+            if (maxRemoveCount <= 0) return points;
+
+            List<PointDistance> rejected = distances
+                .Where(x => x.Distance > parameters.RejectDistance)
+                .OrderByDescending(x => x.Distance)
+                .Take(maxRemoveCount)
+                .ToList();
+            if (rejected.Count == 0) return points;
+
+            HashSet<LineEdgePoint> rejectedPoints = new HashSet<LineEdgePoint>(rejected.Select(x => x.Point));
+            List<LineEdgePoint> filtered = points
+                .Where(x => !rejectedPoints.Contains(x))
+                .ToList();
+
+            return filtered.Count >= 2 ? filtered : points;
+        }
+
+        /// <summary>
+        /// 按拟合参数生成裁剪到ROI内部的结果线段。
+        /// </summary>
+        /// <param name="frame">直线检测测量框。</param>
+        /// <param name="parameters">直线检测参数。</param>
+        /// <param name="edgePoints">参与拟合的检测点集合。</param>
+        /// <returns>结果线段的起点和终点。</returns>
         private static PointF[] FitLine(LineDetectionFrame frame, LineDetectionParams parameters, List<LineEdgePoint> edgePoints)
         {
-            Point2f[] points = edgePoints.Select(x => new Point2f(x.Point.X, x.Point.Y)).ToArray();
-            Line2D line = parameters.FitMode == LineFitMode.LeastSquares
-                ? Cv2.FitLine(points, DistanceTypes.L2, 0, 0.01, 0.01)
-                : Cv2.FitLine(points, DistanceTypes.Welsch, 0, 0.01, 0.01);
+            FittedLine line = FitLine(edgePoints, parameters);
+            if (!line.IsValid)
+            {
+                line = FitByLeastSquares(edgePoints);
+            }
 
-            PointF direction = new PointF((float)line.Vx, (float)line.Vy);
-            PointF point = new PointF((float)line.X1, (float)line.Y1);
+            PointF direction = line.Direction;
+            PointF point = line.Point;
             PointF arrangeDir = frame.GetLineArrangeDirection(parameters.ScanDirection);
             if (direction.X * arrangeDir.X + direction.Y * arrangeDir.Y < 0f)
             {
@@ -1099,6 +1153,205 @@ namespace OpenCvWindowTool
             return ClipLineToFrame(point, direction, frame, out PointF clippedStart, out PointF clippedEnd)
                 ? new[] { clippedStart, clippedEnd }
                 : new[] { start, end };
+        }
+
+        /// <summary>
+        /// 使用指定方式拟合直线。
+        /// </summary>
+        /// <param name="points">参与拟合的检测点集合。</param>
+        /// <param name="parameters">直线检测参数。</param>
+        /// <returns>拟合出的无限直线。</returns>
+        private static FittedLine FitLine(List<LineEdgePoint> points, LineDetectionParams parameters)
+        {
+            switch (parameters.FitMode)
+            {
+                case LineFitMode.LeastSquares:
+                    return FitByLeastSquares(points);
+                case LineFitMode.Huber:
+                    return FitByHuber(points, parameters.RejectDistance);
+                case LineFitMode.Ransac:
+                    return FitByRansac(points, parameters.RejectDistance);
+                default:
+                    return FitByLocal(points, parameters.RejectDistance);
+            }
+        }
+
+        /// <summary>
+        /// 使用局部拟合方式拟合直线。
+        /// </summary>
+        /// <param name="points">参与拟合的检测点集合。</param>
+        /// <param name="rejectDistance">局部点距离阈值。</param>
+        /// <returns>拟合出的无限直线。</returns>
+        private static FittedLine FitByLocal(List<LineEdgePoint> points, int rejectDistance)
+        {
+            if (points.Count <= 3) return FitByLeastSquares(points);
+
+            FittedLine first = FitByLeastSquares(points);
+            if (!first.IsValid) return first;
+
+            float limit = Math.Max(1f, rejectDistance);
+            List<LineEdgePoint> local = points
+                .Select(x => new PointDistance(x, DistanceToLine(x.Point, first)))
+                .Where(x => x.Distance <= limit)
+                .OrderBy(x => x.Distance)
+                .Select(x => x.Point)
+                .ToList();
+
+            return local.Count >= 2 ? FitByLeastSquares(local) : first;
+        }
+
+        /// <summary>
+        /// 使用最小二乘拟合直线。
+        /// </summary>
+        /// <param name="points">参与拟合的检测点集合。</param>
+        /// <returns>拟合出的无限直线。</returns>
+        private static FittedLine FitByLeastSquares(List<LineEdgePoint> points)
+        {
+            if (points == null || points.Count < 2) return FittedLine.Invalid;
+
+            double meanX = points.Average(x => x.Point.X);
+            double meanY = points.Average(x => x.Point.Y);
+            double sxx = 0d;
+            double syy = 0d;
+            double sxy = 0d;
+            foreach (LineEdgePoint edgePoint in points)
+            {
+                double dx = edgePoint.Point.X - meanX;
+                double dy = edgePoint.Point.Y - meanY;
+                sxx += dx * dx;
+                syy += dy * dy;
+                sxy += dx * dy;
+            }
+
+            if (sxx + syy <= 0.000001d) return FittedLine.Invalid;
+
+            double theta = 0.5d * Math.Atan2(2d * sxy, sxx - syy);
+            PointF direction = Normalize(new PointF((float)Math.Cos(theta), (float)Math.Sin(theta)));
+            return FittedLine.FromPointDirection(new PointF((float)meanX, (float)meanY), direction);
+        }
+
+        /// <summary>
+        /// 使用Huber权重拟合直线。
+        /// </summary>
+        /// <param name="points">参与拟合的检测点集合。</param>
+        /// <param name="rejectDistance">Huber距离阈值。</param>
+        /// <returns>拟合出的无限直线。</returns>
+        private static FittedLine FitByHuber(List<LineEdgePoint> points, int rejectDistance)
+        {
+            FittedLine line = FitByLeastSquares(points);
+            if (!line.IsValid) return line;
+
+            float delta = Math.Max(1f, rejectDistance);
+            for (int iteration = 0; iteration < 6; iteration++)
+            {
+                double weightSum = 0d;
+                double meanX = 0d;
+                double meanY = 0d;
+                foreach (LineEdgePoint point in points)
+                {
+                    float distance = DistanceToLine(point.Point, line);
+                    double weight = distance <= delta ? 1d : delta / Math.Max(distance, 0.0001f);
+                    weightSum += weight;
+                    meanX += point.Point.X * weight;
+                    meanY += point.Point.Y * weight;
+                }
+
+                if (weightSum <= 0d) break;
+                meanX /= weightSum;
+                meanY /= weightSum;
+
+                double sxx = 0d;
+                double syy = 0d;
+                double sxy = 0d;
+                foreach (LineEdgePoint point in points)
+                {
+                    float distance = DistanceToLine(point.Point, line);
+                    double weight = distance <= delta ? 1d : delta / Math.Max(distance, 0.0001f);
+                    double dx = point.Point.X - meanX;
+                    double dy = point.Point.Y - meanY;
+                    sxx += weight * dx * dx;
+                    syy += weight * dy * dy;
+                    sxy += weight * dx * dy;
+                }
+
+                double theta = 0.5d * Math.Atan2(2d * sxy, sxx - syy);
+                line = FittedLine.FromPointDirection(new PointF((float)meanX, (float)meanY), Normalize(new PointF((float)Math.Cos(theta), (float)Math.Sin(theta))));
+                if (!line.IsValid) break;
+            }
+
+            return line;
+        }
+
+        /// <summary>
+        /// 使用简化RANSAC拟合直线。
+        /// </summary>
+        /// <param name="points">参与拟合的检测点集合。</param>
+        /// <param name="rejectDistance">内点距离阈值。</param>
+        /// <returns>拟合出的无限直线。</returns>
+        private static FittedLine FitByRansac(List<LineEdgePoint> points, int rejectDistance)
+        {
+            if (points.Count < 2) return FittedLine.Invalid;
+
+            float tolerance = Math.Max(1f, rejectDistance);
+            FittedLine best = FittedLine.Invalid;
+            int bestCount = 0;
+            float bestDistance = float.MaxValue;
+
+            for (int i = 0; i < points.Count - 1; i++)
+            {
+                for (int j = i + 1; j < points.Count; j++)
+                {
+                    FittedLine candidate = FittedLine.FromPoints(points[i].Point, points[j].Point);
+                    if (!candidate.IsValid) continue;
+
+                    int count = 0;
+                    float distanceSum = 0f;
+                    foreach (LineEdgePoint point in points)
+                    {
+                        float distance = DistanceToLine(point.Point, candidate);
+                        if (distance <= tolerance)
+                        {
+                            count++;
+                            distanceSum += distance;
+                        }
+                    }
+
+                    if (count > bestCount || (count == bestCount && distanceSum < bestDistance))
+                    {
+                        best = candidate;
+                        bestCount = count;
+                        bestDistance = distanceSum;
+                    }
+                }
+            }
+
+            if (!best.IsValid) return FitByLeastSquares(points);
+
+            List<LineEdgePoint> inliers = points.Where(x => DistanceToLine(x.Point, best) <= tolerance).ToList();
+            return inliers.Count >= 2 ? FitByLeastSquares(inliers) : best;
+        }
+
+        /// <summary>
+        /// 计算点到直线的距离。
+        /// </summary>
+        /// <param name="point">待计算的点。</param>
+        /// <param name="line">拟合直线。</param>
+        /// <returns>点到直线的垂直距离。</returns>
+        private static float DistanceToLine(PointF point, FittedLine line)
+        {
+            PointF delta = new PointF(point.X - line.Point.X, point.Y - line.Point.Y);
+            return Math.Abs(Dot(delta, line.Normal));
+        }
+
+        /// <summary>
+        /// 归一化向量。
+        /// </summary>
+        /// <param name="point">输入向量。</param>
+        /// <returns>单位向量，长度过小时返回空点。</returns>
+        private static PointF Normalize(PointF point)
+        {
+            float length = (float)Math.Sqrt(point.X * point.X + point.Y * point.Y);
+            return length <= 0.000001f ? PointF.Empty : new PointF(point.X / length, point.Y / length);
         }
 
         private static bool ClipLineToFrame(PointF point, PointF direction, LineDetectionFrame frame, out PointF start, out PointF end)
@@ -1241,6 +1494,68 @@ namespace OpenCvWindowTool
             public LineHypothesis WithScore(float score)
             {
                 return new LineHypothesis(Point, Direction, Normal, score, IsValid);
+            }
+        }
+
+        private struct FittedLine
+        {
+            public static readonly FittedLine Invalid = new FittedLine(PointF.Empty, PointF.Empty, PointF.Empty, false);
+
+            public readonly PointF Point;
+            public readonly PointF Direction;
+            public readonly PointF Normal;
+            public readonly bool IsValid;
+
+            private FittedLine(PointF point, PointF direction, PointF normal, bool isValid)
+            {
+                Point = point;
+                Direction = direction;
+                Normal = normal;
+                IsValid = isValid;
+            }
+
+            /// <summary>
+            /// 按直线经过点和方向创建拟合直线。
+            /// </summary>
+            /// <param name="point">直线经过的点。</param>
+            /// <param name="direction">直线方向。</param>
+            /// <returns>拟合直线。</returns>
+            public static FittedLine FromPointDirection(PointF point, PointF direction)
+            {
+                float length = (float)Math.Sqrt(direction.X * direction.X + direction.Y * direction.Y);
+                if (length <= 0.000001f) return Invalid;
+
+                PointF unit = new PointF(direction.X / length, direction.Y / length);
+                PointF normal = new PointF(-unit.Y, unit.X);
+                return new FittedLine(point, unit, normal, true);
+            }
+
+            /// <summary>
+            /// 按两个点创建拟合直线。
+            /// </summary>
+            /// <param name="start">起点。</param>
+            /// <param name="end">终点。</param>
+            /// <returns>拟合直线。</returns>
+            public static FittedLine FromPoints(PointF start, PointF end)
+            {
+                return FromPointDirection(start, new PointF(end.X - start.X, end.Y - start.Y));
+            }
+        }
+
+        private struct PointDistance
+        {
+            public readonly LineEdgePoint Point;
+            public readonly float Distance;
+
+            /// <summary>
+            /// 初始化检测点到拟合直线的距离记录。
+            /// </summary>
+            /// <param name="point">检测点。</param>
+            /// <param name="distance">点到直线的距离。</param>
+            public PointDistance(LineEdgePoint point, float distance)
+            {
+                Point = point;
+                Distance = distance;
             }
         }
     }

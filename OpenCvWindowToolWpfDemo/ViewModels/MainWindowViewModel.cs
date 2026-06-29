@@ -72,6 +72,8 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         private double sampleCount;
         private double edgeWidth;
         private double projectionWidth;
+        private double rejectRatio;
+        private double rejectDistance;
         private bool showSearchLines;
         private string imageStatus;
         private string roiStatus;
@@ -108,19 +110,22 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
             };
             FitModeOptions = new[]
             {
-                new ComboOption<LineFitMode>("鲁棒拟合", LineFitMode.Robust),
-                new ComboOption<LineFitMode>("最小二乘拟合", LineFitMode.LeastSquares)
+                new ComboOption<LineFitMode>("局部拟合", LineFitMode.Local),
+                new ComboOption<LineFitMode>("最小二乘拟合", LineFitMode.LeastSquares),
+                new ComboOption<LineFitMode>("Huber拟合", LineFitMode.Huber)
             };
 
             currentModule = OperatorModule.Input;
             currentDirection = LineScanDirection.LeftToRight;
             selectedPolarity = PolarityOptions[2];
             selectedSelectionMode = SelectionModeOptions[2];
-            selectedFitMode = FitModeOptions[0];
+            selectedFitMode = FitModeOptions[1];
             threshold = 20d;
             sampleCount = 40d;
             edgeWidth = 1d;
             projectionWidth = 1d;
+            rejectRatio = 20d;
+            rejectDistance = 5d;
             showSearchLines = true;
             imageStatus = "未导入图像";
             roiStatus = "未创建ROI";
@@ -417,6 +422,30 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         }
 
         /// <summary>
+        /// 获取或设置外点剔除比例上限。
+        /// </summary>
+        public double RejectRatio
+        {
+            get { return rejectRatio; }
+            set
+            {
+                if (SetProperty(ref rejectRatio, value)) RequestDetection();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置外点剔除距离。
+        /// </summary>
+        public double RejectDistance
+        {
+            get { return rejectDistance; }
+            set
+            {
+                if (SetProperty(ref rejectDistance, value)) RequestDetection();
+            }
+        }
+
+        /// <summary>
         /// 获取或设置是否显示搜索线。
         /// </summary>
         public bool ShowSearchLines
@@ -575,10 +604,12 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
                 SampleCount = Math.Max(2, (int)Math.Round(SampleCount)),
                 EdgeWidth = Math.Max(1, (int)Math.Round(EdgeWidth)),
                 ProjectionWidth = Math.Max(1, (int)Math.Round(ProjectionWidth)),
+                RejectRatio = Math.Min(99, Math.Max(0, (int)Math.Round(RejectRatio))),
+                RejectDistance = Math.Min(20, Math.Max(0, (int)Math.Round(RejectDistance))),
                 ShowSearchLines = ShowSearchLines,
                 EdgePolarity = SelectedPolarity == null ? LineEdgePolarity.Any : SelectedPolarity.Value,
                 SelectionMode = SelectedSelectionMode == null ? LineSelectionMode.Strongest : SelectedSelectionMode.Value,
-                FitMode = SelectedFitMode == null ? LineFitMode.Robust : SelectedFitMode.Value,
+                FitMode = SelectedFitMode == null ? LineFitMode.LeastSquares : SelectedFitMode.Value,
                 ScanDirection = CurrentDirection
             };
         }
