@@ -91,8 +91,8 @@ namespace OpenCvWindowTool
                 SmoothSize = MakeOdd(Math.Max(1, source.SmoothSize)),
                 EdgeWidth = Math.Max(1, source.EdgeWidth),
                 ProjectionWidth = MakeOdd(Math.Max(1, source.ProjectionWidth)),
-                RejectRatio = Math.Max(0, source.RejectRatio),
-                RejectDistance = Math.Max(0, source.RejectDistance),
+                RejectRatio = Math.Min(99, Math.Max(0, source.RejectRatio)),
+                RejectDistance = Math.Min(20, Math.Max(0, source.RejectDistance)),
                 ProfileLineIndex = Math.Max(1, source.ProfileLineIndex),
                 ShowSearchLines = source.ShowSearchLines,
                 EdgePolarity = source.EdgePolarity,
@@ -510,14 +510,14 @@ namespace OpenCvWindowTool
         }
 
         /// <summary>
-        /// 剔除距离拟合线过远的外点。
+        /// 按剔除距离和剔除比例过滤拟合线外点。
         /// </summary>
         /// <param name="points">原始点集合。</param>
         /// <param name="parameters">检测参数。</param>
         /// <returns>剔除后的点集合。</returns>
         private static List<LineEdgePoint> RejectOutliers(List<LineEdgePoint> points, LineDetectionParams parameters)
         {
-            if (points.Count < 3 || (parameters.RejectDistance <= 0 && parameters.RejectRatio <= 0)) return points;
+            if (points.Count < 3 || parameters.RejectDistance <= 0 || parameters.RejectRatio <= 0) return points;
 
             FittedLine line = FitByLeastSquares(points);
             if (!line.IsValid) return points;
@@ -528,19 +528,20 @@ namespace OpenCvWindowTool
                 distances.Add(new PointDistance(point, DistanceToLine(point.Point, line)));
             }
 
-            float distanceLimit = parameters.RejectDistance <= 0 ? float.MaxValue : parameters.RejectDistance;
-            int keepCount = points.Count;
-            if (parameters.RejectRatio > 0)
-            {
-                int removeCount = (int)Math.Floor(points.Count * Math.Min(20, parameters.RejectRatio) / 100f);
-                keepCount = Math.Max(2, points.Count - removeCount);
-            }
+            int maxRemoveCount = (int)Math.Floor(points.Count * parameters.RejectRatio / 100f);
+            maxRemoveCount = Math.Min(points.Count - 2, Math.Max(0, maxRemoveCount));
+            if (maxRemoveCount <= 0) return points;
 
-            List<LineEdgePoint> filtered = distances
-                .Where(x => x.Distance <= distanceLimit)
-                .OrderBy(x => x.Distance)
-                .Take(keepCount)
-                .Select(x => x.Point)
+            List<PointDistance> rejected = distances
+                .Where(x => x.Distance > parameters.RejectDistance)
+                .OrderByDescending(x => x.Distance)
+                .Take(maxRemoveCount)
+                .ToList();
+            if (rejected.Count == 0) return points;
+
+            HashSet<LineEdgePoint> rejectedPoints = new HashSet<LineEdgePoint>(rejected.Select(x => x.Point));
+            List<LineEdgePoint> filtered = points
+                .Where(x => !rejectedPoints.Contains(x))
                 .ToList();
 
             return filtered.Count >= 2 ? filtered : points;

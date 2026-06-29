@@ -213,14 +213,14 @@
                         <TextBlock Text="剔除比例" Style="{StaticResource FieldLabelStyle}" />
                         <controls:NumericInputBox Value="{Binding RejectRatio, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                   Minimum="0"
-                                                  Maximum="20"
+                                                  Maximum="99"
                                                   Increment="1"
                                                   ValueKind="Integer" />
 
                         <TextBlock Text="剔除距离(像素)" Style="{StaticResource FieldLabelStyle}" />
                         <controls:NumericInputBox Value="{Binding RejectDistance, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                   Minimum="0"
-                                                  Maximum="99"
+                                                  Maximum="20"
                                                   Increment="1"
                                                   ValueKind="Integer" />
 
