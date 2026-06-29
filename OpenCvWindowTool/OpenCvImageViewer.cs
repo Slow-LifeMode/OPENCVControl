@@ -290,6 +290,18 @@ namespace OpenCvWindowTool
         }
 
         /// <summary>
+        /// 按指定模式执行直线检测并返回结果。
+        /// </summary>
+        /// <param name="roi">检测ROI。</param>
+        /// <param name="parameters">检测参数。</param>
+        /// <param name="mode">检测模式。</param>
+        /// <returns>直线检测结果。</returns>
+        public LineDetectionResult DetectLine(RoiItem roi, LineDetectionParams parameters, LineDetectionMode mode)
+        {
+            return viewerAction.DetectLine(roi, parameters, mode);
+        }
+
+        /// <summary>
         /// 显示直线检测结果。
         /// </summary>
         /// <param name="result">检测结果。</param>

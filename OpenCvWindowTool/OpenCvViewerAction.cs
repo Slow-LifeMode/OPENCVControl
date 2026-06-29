@@ -21,6 +21,7 @@ namespace OpenCvWindowTool
         private readonly List<OverlayItem> linePreviewOverlays = new List<OverlayItem>();
         private readonly List<RoiItem> rois = new List<RoiItem>();
         private readonly LineDetectionOperator lineDetectionOperator = new LineDetectionOperator();
+        private readonly OptLineDetectionOperator optLineDetectionOperator = new OptLineDetectionOperator();
         private Mat image;
         private LineDetectionImageContext lineDetectionContext;
         private Bitmap bitmap;
@@ -357,8 +358,17 @@ namespace OpenCvWindowTool
         /// </summary>
         public LineDetectionResult DetectLine(RoiItem roi, LineDetectionParams parameters)
         {
-            LineDetectionResult result = lineDetectionOperator.Detect(lineDetectionContext, roi, parameters);
-            return result;
+            return DetectLine(roi, parameters, LineDetectionMode.SelfMode);
+        }
+
+        /// <summary>
+        /// 按指定模式执行直线检测。
+        /// </summary>
+        public LineDetectionResult DetectLine(RoiItem roi, LineDetectionParams parameters, LineDetectionMode mode)
+        {
+            return mode == LineDetectionMode.OPTMode
+                ? optLineDetectionOperator.Detect(lineDetectionContext, roi, parameters)
+                : lineDetectionOperator.Detect(lineDetectionContext, roi, parameters);
         }
 
         /// <summary>

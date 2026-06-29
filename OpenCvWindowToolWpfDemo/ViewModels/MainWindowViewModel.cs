@@ -65,6 +65,7 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
     {
         private OperatorModule currentModule;
         private LineScanDirection currentDirection;
+        private ComboOption<LineDetectionMode> selectedDetectionMode;
         private ComboOption<LineEdgePolarity> selectedPolarity;
         private ComboOption<LineSelectionMode> selectedSelectionMode;
         private ComboOption<LineFitMode> selectedFitMode;
@@ -74,6 +75,14 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         private double projectionWidth;
         private double rejectRatio;
         private double rejectDistance;
+        private double profileLineIndex;
+        private double roiCenterX;
+        private double roiCenterY;
+        private double roiWidth;
+        private double roiHeight;
+        private double roiAngle;
+        private bool hasRoiGeometry;
+        private bool updatingRoiGeometry;
         private bool showSearchLines;
         private string imageStatus;
         private string roiStatus;
@@ -96,6 +105,11 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         /// </summary>
         public MainWindowViewModel()
         {
+            DetectionModeOptions = new[]
+            {
+                new ComboOption<LineDetectionMode>("SelfMode", LineDetectionMode.SelfMode),
+                new ComboOption<LineDetectionMode>("OPTMode", LineDetectionMode.OPTMode)
+            };
             PolarityOptions = new[]
             {
                 new ComboOption<LineEdgePolarity>("从黑到白", LineEdgePolarity.Positive),
@@ -117,6 +131,7 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
 
             currentModule = OperatorModule.Input;
             currentDirection = LineScanDirection.LeftToRight;
+            selectedDetectionMode = DetectionModeOptions[0];
             selectedPolarity = PolarityOptions[2];
             selectedSelectionMode = SelectionModeOptions[2];
             selectedFitMode = FitModeOptions[1];
@@ -126,6 +141,7 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
             projectionWidth = 1d;
             rejectRatio = 20d;
             rejectDistance = 5d;
+            profileLineIndex = 1d;
             showSearchLines = true;
             imageStatus = "未导入图像";
             roiStatus = "未创建ROI";
@@ -183,6 +199,16 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         /// 请求执行直线检测时触发。
         /// </summary>
         public event Action DetectRequested;
+
+        /// <summary>
+        /// 请求回写ROI几何参数时触发。
+        /// </summary>
+        public event Action RoiGeometryChanged;
+
+        /// <summary>
+        /// 获取检测模式选项。
+        /// </summary>
+        public ComboOption<LineDetectionMode>[] DetectionModeOptions { get; private set; }
 
         /// <summary>
         /// 获取边缘极性选项。
@@ -338,6 +364,23 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         public bool IsRightToLeft => CurrentDirection == LineScanDirection.RightToLeft;
 
         /// <summary>
+        /// 获取或设置当前检测模式。
+        /// </summary>
+        public ComboOption<LineDetectionMode> SelectedDetectionMode
+        {
+            get { return selectedDetectionMode; }
+            set
+            {
+                if (SetProperty(ref selectedDetectionMode, value)) RequestDetection();
+            }
+        }
+
+        /// <summary>
+        /// 获取当前检测模式。
+        /// </summary>
+        public LineDetectionMode CurrentDetectionMode => SelectedDetectionMode == null ? LineDetectionMode.SelfMode : SelectedDetectionMode.Value;
+
+        /// <summary>
         /// 获取或设置选中的边缘极性。
         /// </summary>
         public ComboOption<LineEdgePolarity> SelectedPolarity
@@ -446,6 +489,18 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         }
 
         /// <summary>
+        /// 获取或设置剖面图搜索线编号。
+        /// </summary>
+        public double ProfileLineIndex
+        {
+            get { return profileLineIndex; }
+            set
+            {
+                if (SetProperty(ref profileLineIndex, value)) RequestDetection();
+            }
+        }
+
+        /// <summary>
         /// 获取或设置是否显示搜索线。
         /// </summary>
         public bool ShowSearchLines
@@ -454,6 +509,75 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
             set
             {
                 if (SetProperty(ref showSearchLines, value)) RequestDetection();
+            }
+        }
+
+        /// <summary>
+        /// 获取当前是否有可编辑ROI。
+        /// </summary>
+        public bool HasRoiGeometry
+        {
+            get { return hasRoiGeometry; }
+            private set { SetProperty(ref hasRoiGeometry, value); }
+        }
+
+        /// <summary>
+        /// 获取或设置ROI中心点X。
+        /// </summary>
+        public double RoiCenterX
+        {
+            get { return roiCenterX; }
+            set
+            {
+                if (SetProperty(ref roiCenterX, value)) RequestRoiGeometryChange();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置ROI中心点Y。
+        /// </summary>
+        public double RoiCenterY
+        {
+            get { return roiCenterY; }
+            set
+            {
+                if (SetProperty(ref roiCenterY, value)) RequestRoiGeometryChange();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置ROI宽度。
+        /// </summary>
+        public double RoiWidth
+        {
+            get { return roiWidth; }
+            set
+            {
+                if (SetProperty(ref roiWidth, value)) RequestRoiGeometryChange();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置ROI高度。
+        /// </summary>
+        public double RoiHeight
+        {
+            get { return roiHeight; }
+            set
+            {
+                if (SetProperty(ref roiHeight, value)) RequestRoiGeometryChange();
+            }
+        }
+
+        /// <summary>
+        /// 获取或设置ROI角度。
+        /// </summary>
+        public double RoiAngle
+        {
+            get { return roiAngle; }
+            set
+            {
+                if (SetProperty(ref roiAngle, value)) RequestRoiGeometryChange();
             }
         }
 
@@ -606,12 +730,35 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
                 ProjectionWidth = Math.Max(1, (int)Math.Round(ProjectionWidth)),
                 RejectRatio = Math.Min(99, Math.Max(0, (int)Math.Round(RejectRatio))),
                 RejectDistance = Math.Min(20, Math.Max(0, (int)Math.Round(RejectDistance))),
+                ProfileLineIndex = Math.Max(1, (int)Math.Round(ProfileLineIndex)),
                 ShowSearchLines = ShowSearchLines,
                 EdgePolarity = SelectedPolarity == null ? LineEdgePolarity.Any : SelectedPolarity.Value,
                 SelectionMode = SelectedSelectionMode == null ? LineSelectionMode.Strongest : SelectedSelectionMode.Value,
                 FitMode = SelectedFitMode == null ? LineFitMode.LeastSquares : SelectedFitMode.Value,
                 ScanDirection = CurrentDirection
             };
+        }
+
+        /// <summary>
+        /// 按当前ROI刷新界面上的几何参数。
+        /// </summary>
+        /// <param name="roi">当前ROI。</param>
+        public void SetRoiGeometry(RoiItem roi)
+        {
+            updatingRoiGeometry = true;
+            try
+            {
+                HasRoiGeometry = roi != null;
+                RoiCenterX = roi == null ? 0d : roi.Center.X;
+                RoiCenterY = roi == null ? 0d : roi.Center.Y;
+                RoiWidth = roi == null ? 0d : roi.Width;
+                RoiHeight = roi == null ? 0d : roi.Height;
+                RoiAngle = roi == null ? 0d : roi.Angle;
+            }
+            finally
+            {
+                updatingRoiGeometry = false;
+            }
         }
 
         /// <summary>
@@ -687,6 +834,15 @@ namespace OpenCvWindowToolWpfDemo.ViewModels
         private void RequestDetection()
         {
             DetectRequested?.Invoke();
+        }
+
+        /// <summary>
+        /// 请求回写ROI几何参数。
+        /// </summary>
+        private void RequestRoiGeometryChange()
+        {
+            if (updatingRoiGeometry) return;
+            RoiGeometryChanged?.Invoke();
         }
 
         /// <summary>
